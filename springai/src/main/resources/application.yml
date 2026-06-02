@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: LLMentor_SpringAI
+  ai:
+    dashscope:
+      api-key: @dashscope.api.key@
+    chat:
+      memory:
+        repository:
+          jdbc:
+            platform: mysql
+            initialize-schema: always
+#  datasource:
+#    url: jdbc:mysql://localhost:3306/spring_ai_db2?useUnicode=true&characterEncoding=UTF-8  # 记得改成你自己的
+#    username: root  # 记得改成你自己的
+#    password: root  # 记得改成你自己的
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#  sql:
+#    init:
+#      continue-on-error: true  # SQL初始化失败时继续启动
+server:
+  port: 8000
