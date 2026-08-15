@@ -36,7 +36,7 @@ public class FunctionCallController_4 {
     @GetMapping("/demo1")
     public String demo1(@RequestParam("query") String query) {
         log.info("chat request => {}", query);
-        return chatClient.prompt().toolNames("getTimeFunction").tools(new TimeTools()).user(query).call().content();
+        return chatClient.prompt().toolNames("getWeather").tools(new TimeTools()).user(query).call().content();
     }
 
 

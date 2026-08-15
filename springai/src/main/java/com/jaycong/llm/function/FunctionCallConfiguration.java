@@ -11,7 +11,7 @@ public class FunctionCallConfiguration {
 
     @Bean
     @Description("根据用户输入的城市获取该城市的当前天气")
-    public Function<WeatherService.Request, WeatherService.Response> getTimeFunction(WeatherService weatherService) {
+    public Function<WeatherService.Request, WeatherService.Response> getWeather(WeatherService weatherService) {
         return weatherService::geWeather;
     }
 }
