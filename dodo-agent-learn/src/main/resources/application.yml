@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: dodo-agent-learn
+  ai:
+    openai:
+      api-key: ${DODO_AGENT_OPENAI_API_KEY:}
+      base-url: ${DODO_AGENT_OPENAI_BASE_URL:https://api.openai.com}
+      chat:
+        options:
+          model: ${DODO_AGENT_CHAT_MODEL:gpt-4o-mini}
+          temperature: 0.2
+
+server:
+  port: ${SERVER_PORT:8080}
