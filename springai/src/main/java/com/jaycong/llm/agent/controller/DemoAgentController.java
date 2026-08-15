@@ -1,7 +1,6 @@
 package com.jaycong.llm.agent.controller;
 
 
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -48,10 +47,6 @@ public class DemoAgentController implements InitializingBean {
                 // 实现 Logger 的 Advisor
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(), new SimpleLoggerAdvisor())
                 // 设置 ChatClient 中 ChatModel 的 Options 参数
-                .defaultOptions(
-                        DashScopeChatOptions.builder()
-                                .withTopP(0.7)
-                                .build()
-                ).build();
+                .build();
     }
 }

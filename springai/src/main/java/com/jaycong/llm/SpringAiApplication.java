@@ -1,4 +1,4 @@
-package com.jaycong.llm.agent;
+package com.jaycong.llm;
 
 
 import org.springframework.boot.SpringApplication;

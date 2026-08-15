@@ -1,7 +1,6 @@
 package com.jaycong.llm.agent.agent;
 
 
-import com.alibaba.cloud.ai.dashscope.spec.DashScopeModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;

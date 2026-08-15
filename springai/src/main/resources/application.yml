@@ -1,22 +1,29 @@
 spring:
   application:
-    name: LLMentor_SpringAI
+    name: llm
   ai:
-    dashscope:
-      api-key: @dashscope.api.key@
-    chat:
-      memory:
-        repository:
-          jdbc:
-            platform: mysql
-            initialize-schema: always
+    #    openai:
+    #      api-key: ${deepseek_key}
+    #      base-url: https://api.deepseek.com
+    #      chat:
+    #        options:
+    #          model: deepseek-v4-flash
+    openai:
+      api-key: ${dashcode_key}
+      base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen3.7-max-2026-05-17
   datasource:
     url: jdbc:mysql://localhost:3306/llm?useUnicode=true&characterEncoding=UTF-8  # 记得改成你自己的
     username: root  # 记得改成你自己的
     password: root  # 记得改成你自己的
     driver-class-name: com.mysql.cj.jdbc.Driver
-  sql:
-    init:
-      continue-on-error: true  # SQL初始化失败时继续启动
 server:
   port: 8000
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+
