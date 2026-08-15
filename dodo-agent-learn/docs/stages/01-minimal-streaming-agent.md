@@ -421,6 +421,345 @@ Controller 负责：
 
 Controller 不直接调用 Spring AI，也不保存 `Disposable`。这是为了保持传输层与 Agent 生命周期解耦。
 
+### 6.8 第一阶段核心逻辑伪代码快照
+
+本节是第一阶段的永久行为快照，不依赖未来源码仍然保持当前结构。即使后续阶段重构、替换或删除这些类，也可以根据下面的伪代码还原第一阶段系统。
+
+行为基线对应提交：`3d7d276 feat: add minimal streaming agent console`。后续注释调整已经通过“去除注释后语义一致”检查，因此没有改变这里记录的控制流。
+
+#### 6.8.1 事件协议
+
+```text
+数据结构 AgentStreamEvent:
+    type       # 事件类型，用于区分 text、error、complete。
+    content    # 事件负载；complete 不需要负载。
+
+函数 创建文本事件(content):
+    返回 AgentStreamEvent("text", content)    # 包装一个模型增量文本片段。
+
+函数 创建错误事件(message):
+    返回 AgentStreamEvent("error", message)   # 包装异常、取消或重复会话说明。
+
+函数 创建完成事件():
+    返回 AgentStreamEvent("complete", "")     # 显式标记本轮 Agent 协议结束。
+```
+
+必须保留显式 `complete` 事件，不能只依赖 HTTP 连接关闭。客户端需要通过业务事件确定何时结束加载状态，而网络连接关闭可能来自正常完成、异常或用户断网。
+
+#### 6.8.2 模型抽象与 Spring AI 适配
+
+```text
+接口 ChatStreamPort:
+    函数 stream(message) -> Flux<String>      # 只承诺返回模型文本片段流。
+
+适配器 SpringAiChatStreamAdapter:
+    构造函数(chatModel):
+        chatClient = ChatClient.builder(chatModel).build()
+
+    函数 stream(message):
+        返回 chatClient
+            .prompt()                         # 创建本次模型请求。
+            .user(message)                    # 设置用户消息。
+            .stream()                         # 选择流式响应模式。
+            .content()                        # 只暴露文本 Flux，不泄露框架响应对象。
+```
+
+适配器绝不能在这里调用 `subscribe`。订阅必须由 Agent 发起，因为 Agent 需要同时管理任务注册、`Disposable`、终止事件和资源清理。
+
+#### 6.8.3 内存任务注册表
+
+```text
+类 InMemoryTaskRegistry:
+    tasks = ConcurrentMap<conversationId, TaskEntry>()
+
+    函数 register(conversationId, onCancel) -> boolean:
+        newEntry = TaskEntry(onCancel)
+        oldEntry = tasks.putIfAbsent(conversationId, newEntry)
+        返回 oldEntry == null                 # null 表示当前线程原子注册成功。
+
+    函数 hasRunningTask(conversationId) -> boolean:
+        返回 tasks.containsKey(conversationId)
+
+    函数 attach(conversationId, subscription):
+        entry = tasks.get(conversationId)
+
+        如果 entry == null:                   # 任务可能在 subscribe 返回前已经被取消。
+            subscription.dispose()            # 释放迟到的模型订阅，避免幽灵任务。
+            返回
+
+        entry.attach(subscription)             # 交给 TaskEntry 再次同步检查关闭状态。
+
+    函数 cancel(conversationId) -> boolean:
+        entry = tasks.remove(conversationId)   # 先移除，保证外部取消只有一个线程成功。
+
+        如果 entry == null:
+            返回 false                        # 任务不存在、已完成或已被取消。
+
+        entry.cancel()                         # 释放模型订阅并通知 Agent。
+        返回 true
+
+    函数 complete(conversationId):
+        entry = tasks.remove(conversationId)   # 正常或异常结束后释放会话键。
+
+        如果 entry != null:
+            entry.complete()                   # 只关闭状态，不执行取消回调。
+```
+
+单任务条目的伪代码：
+
+```text
+类 TaskEntry:
+    onCancel                                  # 主动取消时通知 Agent 的回调。
+    subscription = null                       # 模型订阅句柄，稍后通过 attach 绑定。
+    closed = false                            # 一旦关闭就不可重新打开。
+
+    同步函数 attach(newSubscription):
+        如果 closed:
+            newSubscription.dispose()         # cancel 先发生时，释放迟到订阅。
+            返回
+
+        subscription = newSubscription
+
+    同步函数 cancel():
+        如果 closed:
+            返回                              # 保证取消幂等。
+
+        closed = true                          # 必须先关闭，再处理订阅和回调。
+
+        如果 subscription != null:
+            subscription.dispose()            # 真正停止上游模型流。
+
+        onCancel.run()                         # 让 Agent 发送取消错误和完成事件。
+
+    同步函数 complete():
+        closed = true                          # 上游已经结束，不 dispose，不执行 onCancel。
+```
+
+`ConcurrentMap` 保护任务集合，`synchronized` 保护单个任务内部的 `closed + subscription` 组合状态，两者不能互相替代。
+
+#### 6.8.4 StreamingChatAgent 主流程
+
+```text
+函数 stream(conversationId, message) -> Flux<AgentStreamEvent>:
+    返回 Flux.defer:                          # 直到 HTTP 客户端订阅时才执行以下流程。
+
+        output = 创建 unicast Sink
+            .启用背压缓冲                     # 每个 HTTP 请求拥有独立输出通道。
+
+        finished = AtomicBoolean(false)        # 多条终止路径共享的原子闸门。
+
+        onCancel = 函数:
+            如果 finished.compareAndSet(false, true):
+                output.emit(错误事件("request cancelled"))
+                output.emit(完成事件())
+                output.complete()              # 顺序必须是 error → complete → 流关闭。
+
+        如果 tasks.register(conversationId, onCancel) == false:
+            返回 Flux.just(
+                错误事件("conversation is already running"),
+                完成事件()
+            )                                  # 重复会话不调用模型，也不影响原任务。
+
+        subscription = model.stream(message).subscribe(
+            onNext = 函数(chunk):
+                如果 finished.get() == false:
+                    output.emit(文本事件(chunk))
+                否则:
+                    忽略 chunk                 # 终止竞争中迟到的文本不能继续输出。
+
+            onError = 函数(error):
+                finishWithError(
+                    conversationId,
+                    output,
+                    finished,
+                    error
+                )
+
+            onComplete = 函数:
+                finishSuccessfully(
+                    conversationId,
+                    output,
+                    finished
+                )
+        )
+
+        tasks.attach(conversationId, subscription)
+                                               # 保存 Disposable；若任务已关闭，attach 会立即 dispose。
+
+        返回 output.asFlux().doFinally(函数(signal):
+            如果 signal == CANCEL:
+                tasks.cancel(conversationId)   # 客户端断开时向上取消模型。
+            否则:
+                tasks.complete(conversationId) # 正常结束只做幂等清理。
+        )
+```
+
+这里有四个不可改变的执行约束：
+
+1. 使用 `defer` 为每次订阅创建独立状态。
+2. 必须先注册任务，再订阅模型。
+3. 得到 `Disposable` 后必须立刻 attach。
+4. 所有终止路径必须竞争同一个 `finished` 原子状态。
+
+#### 6.8.5 成功与异常终止
+
+```text
+函数 finishSuccessfully(conversationId, output, finished):
+    如果 finished.compareAndSet(false, true):
+        tasks.complete(conversationId)         # 释放任务键，不触发取消回调。
+        output.emit(完成事件())
+        output.complete()                      # 顺序是 complete → 流关闭。
+
+函数 finishWithError(conversationId, output, finished, error):
+    如果 finished.compareAndSet(false, true):
+        tasks.complete(conversationId)         # 模型已经异常，不再执行主动取消逻辑。
+        output.emit(错误事件(error.message))
+        output.emit(完成事件())
+        output.complete()                      # 顺序是 error → complete → 流关闭。
+```
+
+`compareAndSet` 返回 false 时必须什么都不做，因为取消、异常或成功中的另一条路径已经先完成收尾。
+
+#### 6.8.6 HTTP 与 SSE 边界
+
+```text
+函数 GET stream(conversationId, message):
+    如果 conversationId 是空白 或 message 是空白:
+        抛出 HTTP 400                          # 无效请求不能创建 Agent 任务。
+
+    agentEvents = agent.stream(conversationId, message)
+
+    返回 agentEvents.map(函数(event):
+        返回 ServerSentEvent:
+            eventName = event.type
+            data = event
+    )
+
+函数 POST stop(conversationId):
+    stopped = tasks.cancel(conversationId)
+    返回 JSON { "stopped": stopped }
+```
+
+Controller 只做参数校验和协议转换。它不能直接调用模型，也不能保存 Reactor 订阅。
+
+#### 6.8.7 浏览器流式消费
+
+```text
+页面初始化:
+    conversationId = 生成 UUID
+    requestController = null
+
+函数 sendMessage():
+    message = 去除输入首尾空白
+
+    如果 message 为空:
+        显示 "请输入消息"
+        返回
+
+    requestController = 创建 AbortController
+    设置页面状态为 "流式响应中"
+    清空旧输出
+
+    url = /api/agent/chat/stream
+    url 添加 conversationId 和 message 查询参数
+
+    response = fetch(url, signal = requestController.signal)
+
+    如果 HTTP 失败 或 response.body 不存在:
+        抛出请求异常
+
+    reader = response.body.getReader()
+    decoder = UTF-8 TextDecoder
+    buffer = ""
+
+    循环:
+        done, bytes = reader.read()
+
+        如果 done:
+            退出循环
+
+        buffer += decoder.decode(bytes, stream = true)
+        frames, buffer = 按空行切分完整 SSE 帧和剩余半帧
+
+        对每个 frame:
+            dataText = 合并所有 "data:" 行
+            event = JSON.parse(dataText)
+
+            如果 event.type == "text":
+                页面输出追加 event.content
+
+            如果 event.type == "error":
+                页面状态显示 event.content
+
+            如果 event.type == "complete":
+                页面状态显示 "完成"
+
+    捕获异常 error:
+        如果 error 是 AbortError:
+            页面状态显示 "已停止"
+        否则:
+            页面状态显示 error.message
+
+    最终:
+        requestController = null
+        恢复发送按钮
+        禁用停止按钮
+```
+
+SSE 帧切分必须保留未完整到达的半帧。一次网络读取不保证恰好对应一个 SSE 事件，也可能同时包含多个事件。
+
+#### 6.8.8 浏览器主动停止
+
+```text
+函数 stopMessage():
+    response = POST /api/agent/tasks/{conversationId}/stop
+
+    如果 HTTP 失败:
+        页面显示 "停止请求失败"
+        返回
+
+    如果本地 requestController 存在:
+        requestController.abort()              # 后端取消成功后，再结束浏览器读取。
+```
+
+顺序上先请求后端停止，再中止本地读取。否则只中止浏览器 fetch，可能无法确认后端停止接口是否成功执行。
+
+#### 6.8.9 完整状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> WaitingForSubscription: 创建 Flux
+    WaitingForSubscription --> Registering: 客户端订阅
+    Registering --> Rejected: conversationId 已运行
+    Registering --> ModelStreaming: 注册成功并订阅模型
+    ModelStreaming --> ModelStreaming: text chunk
+    ModelStreaming --> Completing: 模型正常完成
+    ModelStreaming --> Failing: 模型异常
+    ModelStreaming --> Cancelling: 停止接口或客户端断开
+    Rejected --> Closed: error + complete
+    Completing --> Closed: complete
+    Failing --> Closed: error + complete
+    Cancelling --> Closed: dispose + error + complete
+    Closed --> [*]: 清理任务
+```
+
+#### 6.8.10 根据文档重新实现的最小顺序
+
+未来如果源码已经变化，需要重新构建第一阶段，可以严格按下面顺序恢复：
+
+1. 定义 `AgentStreamEvent` 的 text、error、complete 协议。
+2. 定义返回 `Flux<String>` 的 `ChatStreamPort`。
+3. 编写 Spring AI 适配器，但不要在适配器中订阅。
+4. 实现带 `TaskEntry` 的内存任务注册表。
+5. 实现 `register → subscribe → attach` 顺序。
+6. 使用 Sink 把模型回调转换成 Agent 事件。
+7. 使用原子状态统一成功、异常和取消终止。
+8. 使用 `doFinally(CANCEL)` 处理客户端断开。
+9. 使用 Controller 将 Agent 事件转换成 SSE。
+10. 实现后端停止接口和浏览器端停止操作。
+11. 使用假模型测试文本顺序、异常、重复会话和取消。
+
+
 ## 7. HTTP 与事件协议
 
 ### 7.1 流式对话接口
@@ -689,10 +1028,10 @@ java -jar dodo-agent-learn/target/dodo-agent-learn-1.0-SNAPSHOT.jar # 启动打�
 4. 总体架构与执行链路。
 5. 核心类及职责。
 6. 核心实现原理。
-7. 接口、事件或数据结构。
-8. 错误处理、并发和资源清理。
-9. 测试方案与验收结果。
-10. 与参考项目的对应关系。
-11. 本阶段核心结论。
-12. 下一阶段前的自检问题。
-
+7. 核心逻辑伪代码快照，必须能够脱离未来源码独立还原本阶段行为。
+8. 接口、事件或数据结构。
+9. 错误处理、并发和资源清理。
+10. 测试方案与验收结果。
+11. 与参考项目的对应关系。
+12. 本阶段核心结论。
+13. 下一阶段前的自检问题。
