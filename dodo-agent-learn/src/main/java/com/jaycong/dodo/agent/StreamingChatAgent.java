@@ -1,12 +1,14 @@
 package com.jaycong.dodo.agent;
 
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
+import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+@Service
 public class StreamingChatAgent {
 
     private final ChatStreamPort model;
