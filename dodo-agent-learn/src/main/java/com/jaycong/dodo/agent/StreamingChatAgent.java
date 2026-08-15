@@ -1,18 +1,18 @@
 package com.jaycong.dodo.agent; // 将核心编排服务放在 Agent 包中，集中表达一轮任务的生命周期规则。
 
-import com.jaycong.dodo.task.InMemoryTaskRegistry; // 引入任务注册表，用于会话互斥、订阅绑定和主动取消。
-import org.springframework.stereotype.Service; // 引入服务注解，把 Agent 编排器注册为 Spring 业务 Bean。
-import reactor.core.publisher.Flux; // 引入 Reactor 多值流，向 HTTP 层持续输出多个 Agent 事件。
-import reactor.core.publisher.SignalType; // 引入终止信号枚举，用于区分客户端取消和其他结束方式。
-import reactor.core.publisher.Sinks; // 引入可编程事件汇，用于把模型回调转换为下游可订阅的 Flux。
+import com.jaycong.dodo.task.InMemoryTaskRegistry;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
+import reactor.core.publisher.Sinks;
 
-import java.util.concurrent.atomic.AtomicBoolean; // 引入原子布尔值，协调成功、异常和取消之间的终止竞争。
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 编排一次最小流式 Agent 对话的核心服务。
  * 该服务负责会话互斥、模型订阅、事件转换、主动取消和所有终止路径的资源清理。
  */
-@Service // 把 Agent 注册为单例服务，供 Web Controller 通过构造器注入使用。
+@Service
 public class StreamingChatAgent { // 定义模型文本流到稳定 Agent 事件流之间的生命周期编排器。
 
     private final ChatStreamPort model; // 保存抽象模型端口，使核心逻辑不依赖 Spring AI 的具体类型。

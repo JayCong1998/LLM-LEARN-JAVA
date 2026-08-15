@@ -1,17 +1,17 @@
 package com.jaycong.dodo.task; // 将任务注册表放在独立任务包中，集中管理运行状态和取消资源。
 
-import org.springframework.stereotype.Component; // 引入 Spring 组件注解，让 Agent 和 Controller 共享同一个注册表实例。
-import reactor.core.Disposable; // 引入 Reactor 订阅句柄，用于主动终止仍在运行的模型流。
+import org.springframework.stereotype.Component;
+import reactor.core.Disposable;
 
-import java.util.concurrent.ConcurrentHashMap; // 引入线程安全哈希表实现，支持多个请求并发访问任务集合。
-import java.util.concurrent.ConcurrentMap; // 引入并发 Map 抽象，明确注册操作需要原子并发语义。
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * 保存当前进程内正在运行的 Agent 任务。
  * 会话编号既是并发互斥键，也是停止接口定位模型订阅的索引。
  * 该实现只适用于单进程学习场景；多实例部署需要替换为分布式任务协调机制。
  */
-@Component // 把注册表注册成单例 Spring Bean，使所有请求观察同一份内存任务状态。
+@Component
 public class InMemoryTaskRegistry { // 定义任务注册、订阅绑定、取消和完成清理的统一入口。
 
     private final ConcurrentMap<String, TaskEntry> tasks = new ConcurrentHashMap<>(); // 按会话编号保存运行任务，并支持无全局锁并发访问。

@@ -1,27 +1,27 @@
 package com.jaycong.dodo.web; // 将控制器放在 Web 边界包中，避免 HTTP 细节进入 Agent 核心。
 
-import com.jaycong.dodo.agent.AgentStreamEvent; // 引入 Agent 的稳定输出协议，作为 SSE 数据负载。
-import com.jaycong.dodo.agent.StreamingChatAgent; // 引入流式 Agent，用于启动一轮模型任务。
-import com.jaycong.dodo.task.InMemoryTaskRegistry; // 引入任务注册表，用于根据会话编号停止任务。
-import org.springframework.http.MediaType; // 引入媒体类型常量，声明接口产生事件流响应。
-import org.springframework.http.codec.ServerSentEvent; // 引入 WebFlux 的 SSE 包装类型，描述事件名称和数据。
-import org.springframework.web.bind.annotation.GetMapping; // 引入 GET 路由注解，用于建立流式对话连接。
-import org.springframework.web.bind.annotation.PathVariable; // 引入路径变量注解，用于读取待停止的会话编号。
-import org.springframework.web.bind.annotation.PostMapping; // 引入 POST 路由注解，用于表达有副作用的停止操作。
-import org.springframework.web.bind.annotation.RequestMapping; // 引入控制器基础路径注解，统一 Agent 接口前缀。
-import org.springframework.web.bind.annotation.RequestParam; // 引入查询参数注解，用于读取会话编号和用户消息。
-import org.springframework.web.bind.annotation.RestController; // 引入 REST 控制器注解，使返回值直接写入 HTTP 响应。
-import org.springframework.web.server.ResponseStatusException; // 引入带 HTTP 状态的异常，用于返回参数错误。
-import reactor.core.publisher.Flux; // 引入 Reactor 多值流，持续向客户端发送多个 SSE 事件。
+import com.jaycong.dodo.agent.AgentStreamEvent;
+import com.jaycong.dodo.agent.StreamingChatAgent;
+import com.jaycong.dodo.task.InMemoryTaskRegistry;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+import reactor.core.publisher.Flux;
 
-import static org.springframework.http.HttpStatus.BAD_REQUEST; // 静态引入 400 状态，清晰表达参数校验失败。
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 /**
  * 暴露最小 Agent 的 HTTP 接口。
  * 控制器只处理协议转换和参数校验，不承载模型调用与任务生命周期规则。
  */
-@RestController // 把类型注册为 WebFlux REST 控制器，并启用返回值序列化。
-@RequestMapping("/api/agent") // 为本控制器的全部接口添加统一的 Agent API 前缀。
+@RestController
+@RequestMapping("/api/agent")
 public class ChatController { // 定义流式对话和任务停止两个 HTTP 边界操作。
 
     private final StreamingChatAgent agent; // 保存 Agent 服务，用于创建对话输出流。
@@ -40,10 +40,12 @@ public class ChatController { // 定义流式对话和任务停止两个 HTTP �
      * @param message        本轮发送给 Agent 的用户消息
      * @return 持续输出 Agent 事件的 SSE 响应流
      */
-    @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE) // 将 GET 路径声明为 SSE 流接口。
+    @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<AgentStreamEvent>> stream( // 返回多事件 Flux，使 WebFlux 可以逐个写出 SSE 帧。
-            @RequestParam String conversationId, // 从查询字符串读取会话编号，并要求请求必须提供该参数。
-            @RequestParam String message) { // 从查询字符串读取用户消息，并结束方法参数列表。
+            @RequestParam
+            String conversationId, // 从查询字符串读取会话编号，并要求请求必须提供该参数。
+            @RequestParam
+            String message) { // 从查询字符串读取用户消息，并结束方法参数列表。
         if (conversationId.isBlank() || message.isBlank()) { // 在创建 Agent 任务前拒绝空白会话编号或空白消息。
             throw new ResponseStatusException( // 抛出 WebFlux 可识别的 HTTP 状态异常，中止本次请求。
                     BAD_REQUEST, // 把非法输入映射为 HTTP 400，而不是内部服务器错误。
@@ -61,8 +63,10 @@ public class ChatController { // 定义流式对话和任务停止两个 HTTP �
      * @param conversationId 路径中携带的目标会话编号
      * @return stopped 表示调用时是否确实存在并取消了对应任务
      */
-    @PostMapping("/tasks/{conversationId}/stop") // 使用 POST 暴露会改变任务运行状态的停止操作。
-    public StopResponse stop(@PathVariable String conversationId) { // 从路径中提取会话编号并执行停止请求。
+    @PostMapping("/tasks/{conversationId}/stop")
+    public StopResponse stop( // 从路径中提取会话编号并执行停止请求。
+            @PathVariable
+            String conversationId) { // 接收路径中的目标会话编号，并结束方法参数列表。
         return new StopResponse(tasks.cancel(conversationId)); // 取消任务，并把布尔结果包装成稳定的 JSON 响应。
     } // 结束任务停止接口方法。
 

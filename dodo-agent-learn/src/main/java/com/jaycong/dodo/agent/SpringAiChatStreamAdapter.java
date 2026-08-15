@@ -1,15 +1,15 @@
 package com.jaycong.dodo.agent; // 将适配器放在 Agent 包中，便于它直接实现核心层定义的模型端口。
 
-import org.springframework.ai.chat.client.ChatClient; // 引入 Spring AI 的高级对话客户端，用链式 API 构造模型请求。
-import org.springframework.ai.chat.model.ChatModel; // 引入 Spring AI 的底层聊天模型抽象，由自动配置提供具体实现。
-import org.springframework.stereotype.Component; // 引入组件注解，使适配器能够被 Spring 扫描并注册为 Bean。
-import reactor.core.publisher.Flux; // 引入 Reactor 文本流类型，与 Agent 端口约定的返回类型保持一致。
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 
 /**
  * 将 Spring AI 的 ChatModel 适配为 Agent 需要的最小文本流端口。
  * 这个适配器把框架特有 API 隔离在边界处，使 Agent 核心只依赖 ChatStreamPort。
  */
-@Component // 把适配器交给 Spring 管理，使依赖 ChatStreamPort 的 Agent 可以通过构造器获得它。
+@Component
 public class SpringAiChatStreamAdapter implements ChatStreamPort { // 实现核心端口，把 Spring AI 转换为纯文本 Flux。
 
     private final ChatClient chatClient; // 保存线程安全的对话客户端，供每一轮消息创建独立请求。
@@ -25,7 +25,7 @@ public class SpringAiChatStreamAdapter implements ChatStreamPort { // 实现核�
      * @param message 本轮需要发送给大模型的用户消息
      * @return 延迟执行的模型文本片段流
      */
-    @Override // 表明这个方法兑现 ChatStreamPort 定义的模型流契约。
+    @Override
     public Flux<String> stream(String message) { // 接收业务层消息，并返回尚未被订阅的响应流。
         return chatClient.prompt() // 创建一次新的提示请求规格，不复用上一轮对话的可变请求状态。
                 .user(message) // 把方法参数设置为本次请求的用户消息。
