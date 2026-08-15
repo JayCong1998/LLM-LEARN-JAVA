@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dodo Agent Learn · Stage 1</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main class="console">
+    <header>
+        <p class="eyebrow">DODO AGENT LEARN · STAGE 1</p>
+        <h1>最小流式 Agent</h1>
+        <p class="intro">观察模型文本如何经过 Agent，被转换成 SSE 事件并实时到达浏览器。</p>
+    </header>
+
+    <section class="session-card" aria-label="当前会话">
+        <span>conversationId</span>
+        <code id="conversation-id"></code>
+    </section>
+
+    <section class="input-panel">
+        <label for="message">发送给模型的消息</label>
+        <textarea id="message" rows="5" placeholder="例如：用一句话解释什么是 Agent" autofocus></textarea>
+        <div class="actions">
+            <button id="send" type="button">开始流式请求</button>
+            <button id="stop" class="secondary" type="button" disabled>停止</button>
+        </div>
+    </section>
+
+    <section class="output-panel">
+        <div class="output-header">
+            <h2>Agent 输出</h2>
+            <span id="status" data-state="ready">就绪</span>
+        </div>
+        <pre id="output" aria-live="polite">等待请求……</pre>
+    </section>
+
+    <footer>
+        本阶段只有 text、error、complete 三种事件；工具调用将在下一阶段加入。
+    </footer>
+</main>
+<script src="js/app.js"></script>
+</body>
+</html>

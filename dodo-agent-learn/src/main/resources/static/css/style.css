@@ -1,0 +1,166 @@
+:root {
+    color-scheme: light;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #18212f;
+    background: #edf2f7;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 40px 20px;
+    background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.16), transparent 34%),
+        #edf2f7;
+}
+
+.console {
+    width: min(820px, 100%);
+    margin: 0 auto;
+    padding: 32px;
+    border: 1px solid #d8e0ea;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 24px 70px rgba(36, 50, 73, 0.12);
+}
+
+.eyebrow {
+    margin: 0 0 6px;
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 750;
+    letter-spacing: 0.14em;
+}
+
+h1 {
+    margin: 0;
+    font-size: clamp(30px, 5vw, 46px);
+    letter-spacing: -0.04em;
+}
+
+.intro {
+    margin: 12px 0 28px;
+    color: #5c6b7d;
+}
+
+.session-card {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 12px 14px;
+    border-radius: 9px;
+    background: #f5f7fa;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.session-card code {
+    overflow-wrap: anywhere;
+    color: #172033;
+}
+
+.input-panel,
+.output-panel {
+    margin-top: 24px;
+}
+
+label,
+h2 {
+    display: block;
+    margin: 0 0 9px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+textarea,
+pre {
+    width: 100%;
+    border: 1px solid #cfd8e3;
+    border-radius: 10px;
+    background: #fbfcfe;
+    color: inherit;
+    font: inherit;
+}
+
+textarea {
+    resize: vertical;
+    padding: 14px;
+    outline: none;
+}
+
+textarea:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+button {
+    padding: 10px 16px;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    background: #2563eb;
+    color: white;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+button.secondary {
+    background: white;
+    color: #2563eb;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#status {
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #eef2f7;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#status[data-state="running"] { background: #dbeafe; color: #1d4ed8; }
+#status[data-state="complete"] { background: #dcfce7; color: #15803d; }
+#status[data-state="stopped"] { background: #fef3c7; color: #a16207; }
+#status[data-state="error"] { background: #fee2e2; color: #b91c1c; }
+
+pre {
+    min-height: 220px;
+    margin: 0;
+    padding: 16px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.65;
+}
+
+footer {
+    margin-top: 22px;
+    color: #718096;
+    font-size: 13px;
+}
+
+@media (max-width: 600px) {
+    body { padding: 16px; }
+    .console { padding: 22px; }
+    .session-card { align-items: flex-start; flex-direction: column; gap: 5px; }
+}
