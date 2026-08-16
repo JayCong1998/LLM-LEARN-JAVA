@@ -579,5 +579,5 @@ ReAct 循环包含阻塞式 `ChatClient.call()`，必须运行在 `boundedElasti
 - 第一阶段停止接口继续可用。
 - 自动化测试全部通过。
 - Maven 打包成功。
-- 产出 `dodo-agent-learn/docs/stages/02-manual-react-agent.md`。
+- 产出 `dodo-agent-learn/tutorials/stages/02-manual-react-agent.md`。
 - 阶段文档包含不依赖未来源码的完整伪代码快照。

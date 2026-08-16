@@ -417,7 +417,7 @@ git commit -m "feat: visualize react tool lifecycle"
 ## Task 10：全量验证并产出第二阶段独立文档
 
 **Files:**
-- Create: `dodo-agent-learn/docs/stages/02-manual-react-agent.md`
+- Create: `dodo-agent-learn/tutorials/stages/02-manual-react-agent.md`
 - Modify when necessary: `dodo-agent-learn/README.md`
 
 **Step 1：运行全量测试**
@@ -448,7 +448,7 @@ Expected: `BUILD SUCCESS`，全部阶段一和阶段二测试通过。
 
 **Step 4：运行文档与敏感信息检查**
 
-Run: `rg -n "TODO|TBD|sk-[A-Za-z0-9_-]+|api-key:\s*[^$]" dodo-agent-learn/docs/stages/02-manual-react-agent.md dodo-agent-learn/src`
+Run: `rg -n "TODO|TBD|sk-[A-Za-z0-9_-]+|api-key:\s*[^$]" dodo-agent-learn/tutorials/stages/02-manual-react-agent.md dodo-agent-learn/src`
 
 Expected: 无真实密钥、无未完成占位符；示例配置只引用环境变量。
 
@@ -461,7 +461,7 @@ Expected: `BUILD SUCCESS`。
 **Step 6：提交阶段文档**
 
 ```bash
-git add dodo-agent-learn/docs/stages/02-manual-react-agent.md dodo-agent-learn/README.md
+git add dodo-agent-learn/tutorials/stages/02-manual-react-agent.md dodo-agent-learn/README.md
 git commit -m "docs: explain manual react agent stage"
 ```
 

@@ -299,7 +299,7 @@ git commit -m "feat: add conversation memory panel"
 ## Task 7：完善第三阶段教程文档并整体验收
 
 **Files:**
-- Create: `docs/stages/03-conversation-memory.md`
+- Create: `tutorials/stages/03-conversation-memory.md`
 - Modify only if required: `README.md`
 
 - [ ] **Step 1：运行完整测试并记录基线**
@@ -331,7 +331,7 @@ Expected: 不出现真实密钥；示例必须使用环境变量或明显占位�
 
 - [ ] **Step 4：执行文档占位符和差异检查**
 
-Run: `rg -n "TODO|TBD|待定|以后实现|implement later" docs/stages/03-conversation-memory.md`
+Run: `rg -n "TODO|TBD|待定|以后实现|implement later" tutorials/stages/03-conversation-memory.md`
 
 Expected: 无未完成占位符。
 
@@ -348,7 +348,7 @@ Expected: BUILD SUCCESS，且 0 failures、0 errors。不得用旧测试结果�
 - [ ] **Step 6：只提交第三阶段文档及必要索引**
 
 ```bash
-git add docs/stages/03-conversation-memory.md README.md
+git add tutorials/stages/03-conversation-memory.md README.md
 git commit -m "docs: explain conversation memory stage"
 ```
 
@@ -363,4 +363,3 @@ git commit -m "docs: explain conversation memory stage"
 - [ ] 制造模型错误或取消请求，GET 中没有失败轮次。
 - [ ] DELETE 后 GET 返回空数组；随后一次成功运行成为新的第一轮。
 - [ ] SSE 仍按 `tool_start`、`tool_end`、`text`、`complete` 协议工作，原有取消和同会话互斥能力没有回归。
-

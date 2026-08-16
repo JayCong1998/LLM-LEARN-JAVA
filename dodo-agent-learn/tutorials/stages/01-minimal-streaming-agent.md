@@ -848,7 +848,7 @@ POST /api/agent/tasks/{conversationId}/stop
 dodo-agent-learn/
 ├── AGENTS.md
 ├── pom.xml
-├── docs/
+├── tutorials/
 │   └── stages/
 │       └── 01-minimal-streaming-agent.md
 └── src/
@@ -1020,7 +1020,7 @@ java -jar dodo-agent-learn/target/dodo-agent-learn-1.0-SNAPSHOT.jar # 启动打�
 
 ## 16. 后续阶段文档约定
 
-后续每个阶段结束时，继续在 `docs/stages/` 下产出独立文档，并保持以下结构：
+后续每个阶段结束时，继续在 `tutorials/stages/` 下产出独立文档，并保持以下结构：
 
 1. 阶段定位。
 2. 目标需求与非目标。
