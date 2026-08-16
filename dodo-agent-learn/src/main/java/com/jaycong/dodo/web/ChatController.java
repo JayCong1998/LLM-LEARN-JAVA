@@ -1,7 +1,7 @@
 package com.jaycong.dodo.web; // 将控制器放在 Web 边界包中，避免 HTTP 细节进入 Agent 核心。
 
 import com.jaycong.dodo.agent.AgentStreamEvent;
-import com.jaycong.dodo.agent.StreamingChatAgent;
+import com.jaycong.dodo.agent.ManualReactAgent;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -24,17 +24,17 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @RequestMapping("/api/agent")
 public class ChatController { // 定义流式对话和任务停止两个 HTTP 边界操作。
 
-    private final StreamingChatAgent agent; // 保存 Agent 服务，用于创建对话输出流。
+    private final ManualReactAgent agent; // 保存手写 ReAct Agent，用于创建包含工具生命周期的对话事件流。
     private final InMemoryTaskRegistry tasks; // 保存任务注册表，用于执行显式取消操作。
 
-    public ChatController(StreamingChatAgent agent, InMemoryTaskRegistry tasks) { // 通过构造器显式声明控制器依赖。
-        this.agent = agent; // 保存 Spring 注入的流式 Agent 实例。
+    public ChatController(ManualReactAgent agent, InMemoryTaskRegistry tasks) { // 通过构造器显式声明阶段二控制器依赖。
+        this.agent = agent; // 保存 Spring 注入的手写 ReAct Agent 实例。
         this.tasks = tasks; // 保存与 Agent 共用的内存任务注册表实例。
     } // 结束控制器构造方法。
 
     /**
      * 建立一次 SSE 对话流。
-     * Controller 只负责 HTTP 边界，实际任务生命周期由 StreamingChatAgent 管理。
+     * Controller 只负责 HTTP 边界，实际 ReAct 状态机和任务生命周期由 ManualReactAgent 管理。
      *
      * @param conversationId 会话唯一编号，同时也是任务并发控制和停止操作的索引
      * @param message        本轮发送给 Agent 的用户消息
