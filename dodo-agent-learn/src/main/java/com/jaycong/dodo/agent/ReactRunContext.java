@@ -1,0 +1,73 @@
+package com.jaycong.dodo.agent; // 将单次 ReAct 可变状态集中在 Agent 核心包中。
+
+import org.springframework.ai.chat.messages.Message;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * 保存一次 Agent 请求从创建到终止的全部可变状态。
+ * 上下文不会注册为 Spring Bean；每次订阅必须创建新实例，避免不同会话共享消息、轮次或取消标记。
+ */
+public class ReactRunContext { // 定义单次运行的消息历史、循环防护和并发终止闸门。
+
+    private final List<Message> messages; // 按实际发生顺序保存发送给模型的全部消息。
+    private final int maxRounds; // 保存允许模型带工具决策的最大轮数。
+    private final Set<String> executedToolSignatures = new HashSet<>(); // 保存已经真实执行过的工具名称与参数签名。
+    private final AtomicBoolean cancelled = new AtomicBoolean(); // 跨停止线程和模型工作线程共享取消状态。
+    private final AtomicBoolean finished = new AtomicBoolean(); // 保护错误、完成和取消路径只发送一次终止序列。
+    private int round; // 记录已经成功开始的工具决策轮数，受同步方法保护。
+
+    public ReactRunContext(List<Message> initialMessages, int maxRounds) { // 接收本轮初始上下文和明确的循环上限。
+        if (maxRounds < 1) { // 拒绝无法执行任何正常决策的无效配置。
+            throw new IllegalArgumentException("maxRounds must be positive"); // 在启动任务前暴露配置错误。
+        } // 结束最大轮次校验分支。
+        this.messages = new ArrayList<>(initialMessages); // 复制初始消息，避免调用方随后修改内部历史。
+        this.maxRounds = maxRounds; // 保存不可变轮次上限供每轮开始前检查。
+    } // 结束 ReAct 运行上下文构造方法。
+
+    public synchronized void addMessage(Message message) { // 串行追加一条系统、用户、助手或工具响应消息。
+        messages.add(message); // 将消息放到历史尾部以保持模型对话时序。
+    } // 释放上下文锁并结束消息追加方法。
+
+    public synchronized List<Message> messages() { // 获取当前完整消息历史的只读快照。
+        return List.copyOf(messages); // 复制并冻结列表，避免模型端或测试修改运行状态。
+    } // 释放上下文锁并结束消息快照方法。
+
+    public synchronized boolean tryStartDecisionRound() { // 尝试在最大轮次范围内开始下一次允许工具的模型决策。
+        if (round >= maxRounds) { // 已达到上限时拒绝第五次及之后的工具决策。
+            return false; // 通知 Agent 改走关闭工具的强制收尾分支。
+        } // 结束最大轮次保护分支。
+        round++; // 只为实际允许开始的决策增加轮次计数。
+        return true; // 通知调用方可以继续本轮工具决策。
+    } // 释放上下文锁并结束轮次开始方法。
+
+    public synchronized int round() { // 读取已经开始的工具决策轮数。
+        return round; // 返回锁保护下的一致轮次快照。
+    } // 释放上下文锁并结束轮次读取方法。
+
+    public synchronized boolean markToolExecution(String toolName, String arguments) { // 登记工具签名并报告它是否首次出现。
+        String normalizedArguments = arguments == null ? "" : arguments.trim(); // 只清理首尾空格，保留模型原始 JSON 的其他差异。
+        String signature = toolName + "\n" + normalizedArguments; // 用不可与普通名称混淆的换行符连接名称和参数。
+        return executedToolSignatures.add(signature); // Set 在首次加入时返回 true，重复签名返回 false。
+    } // 释放上下文锁并结束工具执行登记方法。
+
+    public boolean markCancelled() { // 尝试将本次运行从未取消状态切换为已取消。
+        return cancelled.compareAndSet(false, true); // 只让第一个取消来源获得成功结果并触发后续通知。
+    } // 结束取消状态转换方法。
+
+    public boolean isCancelled() { // 供阻塞循环在模型调用和工具执行边界轮询取消状态。
+        return cancelled.get(); // 使用 AtomicBoolean 获取对其他线程最新写入可见的状态。
+    } // 结束取消状态读取方法。
+
+    public boolean tryFinish() { // 尝试取得本轮唯一的协议终止权。
+        return finished.compareAndSet(false, true); // 只允许第一个完成、异常或取消路径发送终止事件。
+    } // 结束完成闸门状态转换方法。
+
+    public boolean isFinished() { // 查询本次运行是否已经完成协议收尾。
+        return finished.get(); // 返回对所有竞争线程立即可见的完成状态。
+    } // 结束完成状态读取方法。
+} // 结束单次 ReAct 运行上下文定义。
