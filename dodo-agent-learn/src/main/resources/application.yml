@@ -3,7 +3,7 @@ spring:
     name: dodo-agent-learn
   ai:
     openai:
-      api-key: ${OPENAI_API_KEY:} # 只从环境变量读取密钥，避免把真实凭证提交到学习仓库。
+      api-key: ${dashcode_key:} # 只从环境变量读取密钥，避免把真实凭证提交到学习仓库。
       base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
