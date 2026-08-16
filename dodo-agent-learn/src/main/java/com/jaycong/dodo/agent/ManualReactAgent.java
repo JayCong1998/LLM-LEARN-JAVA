@@ -108,7 +108,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 } // 结束模型返回后的取消保护分支。
                 context.addMessage(assistant); // 把包含文本或 ToolCall 的原始助手消息加入历史。
                 if (!assistant.hasToolCalls()) { // 没有 Action 表示模型认为已经可以给出最终答案。
-                    finishSuccessfully(conversationId, context, output, assistant.getText()); // 输出完整文本并执行唯一正常收尾。
+                    finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText()); // 保存本轮问答后输出完整文本并执行唯一正常收尾。
                     return; // 终止循环，避免最终答案之后再次请求模型。
                 } // 结束最终答案判断分支。
                 executeToolCalls(context, output, assistant.getToolCalls()); // 串行执行本轮全部 Action 并回填聚合 Observation。
@@ -124,7 +124,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     finishWithError(conversationId, context, output, "模型在强制收尾阶段仍请求工具"); // 使用稳定错误终止而不执行第五轮工具。
                     return; // 阻止异常 ToolCall 进入实际工具执行路径。
                 } // 结束强制收尾工具调用保护分支。
-                finishSuccessfully(conversationId, context, output, finalAssistant.getText()); // 输出基于已有 Observation 的最终答案。
+                finishSuccessfully(conversationId, currentUserMessage, context, output, finalAssistant.getText()); // 保存本轮问答后输出基于已有 Observation 的最终答案。
             } // 结束最大轮次强制收尾分支。
         } catch (Exception error) { // 捕获模型适配器或循环代码抛出的不可恢复异常。
             finishWithError(conversationId, context, output, errorMessage(error)); // 转换为稳定错误和完成事件，避免 SSE 悬挂。
@@ -169,6 +169,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
 
     private void finishSuccessfully( // 定义最终答案的唯一正常终止序列。
             String conversationId, // 接收需要从任务注册表释放的会话编号。
+            String currentUserMessage, // 接收需要与最终答案配对保存的本次用户问题。
             ReactRunContext context, // 接收保护单次终止的运行上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收最终文本和完成事件的输出通道。
             String answer) { // 接收模型生成的完整最终回答。
@@ -178,6 +179,18 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
         } // 结束空最终答案保护分支。
         if (context.tryFinish()) { // 只有第一个终止路径可以输出并关闭协议流。
             tasks.complete(conversationId); // 先释放会话占用，使任务状态与即将结束的流一致。
+            try { // 在展示最终答案前提交完整问答，保证客户端看到的成功结果已经进入跨请求记忆。
+                memory.append(conversationId, new ConversationTurn(currentUserMessage, answer)); // 只保存用户问题和最终答案，不保存本次工具调用轨迹。
+            } catch (Exception error) { // 捕获记忆实现的保存异常并转换为稳定终止协议。
+                /*
+                 * 当前分支已经通过 tryFinish 取得唯一终止权，不能再调用 finishWithError。
+                 * finishWithError 内部会执行第二次 tryFinish 并失败，最终导致客户端收不到任何错误和完成事件。
+                 */
+                output.tryEmitNext(AgentStreamEvent.error("会话记忆保存失败：" + errorMessage(error))); // 直接发送可诊断的保存失败事件，并明确区分模型错误。
+                output.tryEmitNext(AgentStreamEvent.complete()); // 保存失败后仍发送协议完成事件供前端统一收尾。
+                output.tryEmitComplete(); // 关闭 Reactor 流并触发幂等资源清理。
+                return; // 阻止未成功保存的答案继续作为 text 事件发给客户端。
+            } // 结束记忆保存异常处理分支。
             output.tryEmitNext(AgentStreamEvent.text(answer)); // 阶段二使用单个文本事件发送完整最终答案。
             output.tryEmitNext(AgentStreamEvent.complete()); // 发送显式协议完成事件供前端统一收尾。
             output.tryEmitComplete(); // 关闭 Reactor 流并触发最终清理钩子。
