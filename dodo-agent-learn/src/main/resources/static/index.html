@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dodo Agent Learn · Stage 1</title>
+    <!-- 浏览器标题明确当前学习内容已经进入手写 ReAct 阶段。 -->
+    <title>Dodo Agent Learn · Stage 2</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <main class="console">
     <header>
-        <p class="eyebrow">DODO AGENT LEARN · STAGE 1</p>
-        <h1>最小流式 Agent</h1>
-        <p class="intro">观察模型文本如何经过 Agent，被转换成 SSE 事件并实时到达浏览器。</p>
+        <!-- 阶段标签帮助学习者区分阶段一的纯文本流。 -->
+        <p class="eyebrow">DODO AGENT LEARN · STAGE 2</p>
+        <!-- 主标题聚焦本阶段真正由代码控制的 Agent 循环。 -->
+        <h1>手写 ReAct Agent</h1>
+        <!-- 简介说明页面可观察的信息边界。 -->
+        <p class="intro">观察模型选择工具、代码执行工具、Observation 回填以及最终回答的完整过程。</p>
     </header>
 
     <section class="session-card" aria-label="当前会话">
@@ -28,6 +32,19 @@
         </div>
     </section>
 
+    <!-- 工具轨迹只展示 Action 参数和 Observation 结果，不展示模型内部推理文本。 -->
+    <section class="tool-panel" aria-label="工具调用轨迹">
+        <!-- 标题帮助学习者把工具生命周期与最终回答区分开。 -->
+        <h2>工具调用轨迹</h2>
+        <!-- 前端按照 toolCallId 在此创建或更新同一张工具卡片。 -->
+        <div id="tool-trace" aria-live="polite">
+            <!-- 初始占位说明尚未收到 tool_start 事件。 -->
+            <p class="tool-empty">本轮尚未调用工具</p>
+        <!-- 结束工具轨迹容器。 -->
+        </div>
+    <!-- 结束阶段二工具生命周期展示区域。 -->
+    </section>
+
     <section class="output-panel">
         <div class="output-header">
             <h2>Agent 输出</h2>
@@ -37,7 +54,8 @@
     </section>
 
     <footer>
-        本阶段只有 text、error、complete 三种事件；工具调用将在下一阶段加入。
+        <!-- 页脚列出本阶段稳定事件协议并强调最终回答与工具轨迹分区。 -->
+        本阶段展示 tool_start、tool_end、text、error、complete 五种事件。
     </footer>
 </main>
 <script src="js/app.js"></script>

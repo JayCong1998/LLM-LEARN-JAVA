@@ -64,8 +64,85 @@ h1 {
 }
 
 .input-panel,
+.tool-panel,
 .output-panel {
     margin-top: 24px;
+}
+
+/* 使用网格让多个工具调用按照事件顺序垂直排列。 */
+#tool-trace {
+    /* 卡片之间保留清晰但紧凑的距离。 */
+    display: grid;
+    /* 设置相邻工具卡片的固定间距。 */
+    gap: 10px;
+}
+
+/* 空状态使用次要颜色，避免与真实工具事件争夺视觉焦点。 */
+.tool-empty {
+    /* 移除段落默认外边距以保持面板对齐。 */
+    margin: 0;
+    /* 使用柔和文字颜色表达当前没有工具调用。 */
+    color: #718096;
+}
+
+/* 工具卡片以浅蓝边框表示正在执行。 */
+.tool-card {
+    /* 使用两列网格让名称和状态分别靠左右对齐。 */
+    display: grid;
+    /* 第一列占据剩余空间，第二列只容纳状态。 */
+    grid-template-columns: 1fr auto;
+    /* 设置卡片内部元素之间的距离。 */
+    gap: 8px;
+    /* 为工具信息提供舒适内边距。 */
+    padding: 12px;
+    /* 绘制运行中状态的浅蓝边框。 */
+    border: 1px solid #bfdbfe;
+    /* 使用圆角与现有控制台视觉保持一致。 */
+    border-radius: 10px;
+    /* 使用浅蓝背景突出 Agent 正在执行外部能力。 */
+    background: #eff6ff;
+}
+
+/* 工具完成后切换为绿色成功语义。 */
+.tool-card.complete {
+    /* 完成卡片使用浅绿色边框。 */
+    border-color: #bbf7d0;
+    /* 完成卡片使用浅绿色背景。 */
+    background: #f0fdf4;
+}
+
+/* 状态徽标保持紧凑并与工具名区分。 */
+.tool-state {
+    /* 使用较小字号弱化辅助状态信息。 */
+    font-size: 12px;
+    /* 使用蓝色表示当前正在运行。 */
+    color: #1d4ed8;
+}
+
+/* 已完成工具的状态文字切换为绿色。 */
+.tool-card.complete .tool-state {
+    /* 使用成功色表达工具已经返回 Observation。 */
+    color: #15803d;
+}
+
+/* 工具参数和结果横跨卡片两列。 */
+.tool-data {
+    /* 让数据区从第一列延伸到最后一列。 */
+    grid-column: 1 / -1;
+    /* 覆盖全局 pre 的最小高度，保持工具卡片紧凑。 */
+    min-height: 0;
+    /* 移除全局 pre 外边距。 */
+    margin: 0;
+    /* 缩小工具数据区内边距。 */
+    padding: 10px;
+    /* 工具 JSON 使用更适合代码的字号。 */
+    font-size: 13px;
+}
+
+/* Observation 顶部增加区分线，形成输入到结果的视觉顺序。 */
+.tool-data.observation {
+    /* 使用绿色细线表达这是成功返回的结果区域。 */
+    border-color: #bbf7d0;
 }
 
 label,
