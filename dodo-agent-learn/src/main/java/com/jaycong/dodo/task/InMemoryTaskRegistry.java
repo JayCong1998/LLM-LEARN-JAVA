@@ -60,7 +60,7 @@ public class InMemoryTaskRegistry { // 定义任务注册、订阅绑定、取�
         if (entry == null) { // 如果没有取到条目，说明没有可取消的运行任务。
             return false; // 向停止接口报告本次调用没有实际取消任务。
         } // 结束任务不存在分支。
-        entry.cancel(); // 进入条目的同步取消逻辑，释放订阅并通知输出流。
+        entry.cancel(); // 进入条目的同步取消逻辑，先通知输出流取得终止权，再释放上游订阅。
         return true; // 向调用方报告已经找到并处理对应任务。
     } // 结束主动取消方法。
 
@@ -102,15 +102,15 @@ public class InMemoryTaskRegistry { // 定义任务注册、订阅绑定、取�
             subscription = newSubscription; // 在任务仍打开时保存句柄，供之后的停止请求释放。
         } // 释放条目锁并结束订阅绑定方法。
 
-        private synchronized void cancel() { // 锁定当前条目，使关闭、释放订阅和通知下游按固定顺序执行。
+        private synchronized void cancel() { // 锁定当前条目，使关闭、通知下游和释放订阅按固定顺序执行。
             if (closed) { // 如果其他终止路径已经关闭任务，就不重复释放资源或执行回调。
                 return; // 直接返回，从而让条目级取消操作具备幂等性。
             } // 结束重复关闭保护分支。
             closed = true; // 先设置不可逆关闭标记，让并发 attach 能识别取消已经发生。
+            onCancel.run(); // 先让 Agent 的取消路径取得终止闸门，避免 dispose 引发的中断异常抢先输出成普通错误。
             if (subscription != null) { // 模型订阅可能尚未产生，因此释放前必须检查是否已经绑定。
-                subscription.dispose(); // 取消上游 Reactor 订阅，停止继续接收模型片段并释放网络资源。
+                subscription.dispose(); // 通知下游取消状态后再中断上游工作，停止模型生成并释放资源。
             } // 结束已绑定订阅的资源释放分支。
-            onCancel.run(); // 通知 Agent 输出取消错误和完成事件，使下游 SSE 能够正常结束。
         } // 释放条目锁并结束主动取消方法。
 
         private synchronized void complete() { // 锁定条目并记录正常或异常终止，防止迟到订阅被保存。

@@ -49,7 +49,15 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(message)), // 按系统规则和用户问题初始化消息历史。
                     MAX_DECISION_ROUNDS); // 应用固定四轮工具决策上限。
             Sinks.Many<AgentStreamEvent> output = Sinks.many().unicast().onBackpressureBuffer(); // 创建单客户端可写事件通道并缓冲短暂消费延迟。
-            if (!tasks.register(conversationId, context::markCancelled)) { // 在调用模型前原子占用会话编号，避免重复任务并行。
+            Runnable onCancel = () -> { // 定义停止接口成功后需要执行的稳定协议收尾回调。
+                context.markCancelled(); // 先设置取消标记，让阻塞模型迟到结果和异常不再按普通路径输出。
+                if (context.tryFinish()) { // 只有取消率先取得终止权时才发送一次终止序列。
+                    output.tryEmitNext(AgentStreamEvent.error("request cancelled")); // 向仍连接的客户端明确说明任务被主动停止。
+                    output.tryEmitNext(AgentStreamEvent.complete()); // 发送协议完成事件使前端退出运行状态。
+                    output.tryEmitComplete(); // 关闭 Reactor 流并释放 SSE 下游资源。
+                } // 结束取消终止单次执行保护分支。
+            }; // 结束主动取消协议回调定义。
+            if (!tasks.register(conversationId, onCancel)) { // 在调用模型前原子占用会话编号，避免重复任务并行。
                 return Flux.just( // 为并发冲突创建无需后台工作的有限事件流。
                         AgentStreamEvent.error("conversation is already running"), // 输出与阶段一兼容的会话冲突错误。
                         AgentStreamEvent.complete()); // 输出完成事件让前端退出加载状态。
@@ -96,8 +104,18 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 executeToolCalls(context, output, assistant.getToolCalls()); // 串行执行本轮全部 Action 并回填聚合 Observation。
             } // 结束允许工具的模型决策循环。
             if (!context.isCancelled()) { // 正常路径不应静默耗尽轮次，因此先排除主动取消。
-                finishWithError(conversationId, context, output, "maximum decision rounds reached"); // 暂以稳定错误结束，后续防护任务会替换为关闭工具的强制总结。
-            } // 结束最大轮次临时保护分支。
+                context.addMessage(new UserMessage("工具调用已达到上限，请基于已有观察立即总结并给出最终答案，不要再调用工具。")); // 向模型明确追加只总结已有信息的收尾指令。
+                AssistantMessage finalAssistant = model.decide(context.messages(), false); // 关闭全部工具能力发起最后一次同步决策。
+                if (context.isCancelled()) { // 收尾模型调用返回后再次检查任务是否已被并发停止。
+                    return; // 丢弃取消之后迟到的强制总结结果。
+                } // 结束收尾模型返回后的取消保护分支。
+                context.addMessage(finalAssistant); // 把最后助手消息加入完整运行历史。
+                if (finalAssistant.hasToolCalls()) { // 防御不遵守工具关闭约束的异常模型响应。
+                    finishWithError(conversationId, context, output, "模型在强制收尾阶段仍请求工具"); // 使用稳定错误终止而不执行第五轮工具。
+                    return; // 阻止异常 ToolCall 进入实际工具执行路径。
+                } // 结束强制收尾工具调用保护分支。
+                finishSuccessfully(conversationId, context, output, finalAssistant.getText()); // 输出基于已有 Observation 的最终答案。
+            } // 结束最大轮次强制收尾分支。
         } catch (Exception error) { // 捕获模型适配器或循环代码抛出的不可恢复异常。
             finishWithError(conversationId, context, output, errorMessage(error)); // 转换为稳定错误和完成事件，避免 SSE 悬挂。
         } // 结束同步 ReAct 循环异常边界。
@@ -110,7 +128,12 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>(); // 创建与调用顺序一致的 Observation 响应列表。
         for (AssistantMessage.ToolCall toolCall : toolCalls) { // 串行遍历工具调用，避免共享资源并发和响应乱序。
             output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
-            String observation = tools.execute(toolCall.name(), toolCall.arguments()); // 经过统一错误边界执行本地工具并取得 Observation。
+            String observation; // 声明本次调用最终需要展示并回填模型的 Observation。
+            if (context.markToolExecution(toolCall.name(), toolCall.arguments())) { // 只有标准化签名第一次出现时才允许真实执行。
+                observation = tools.execute(toolCall.name(), toolCall.arguments()); // 经过统一错误边界执行本地工具并取得 Observation。
+            } else { // 相同工具名和清理首尾空格后的参数已经在本次运行中执行过。
+                observation = "工具调用已跳过：检测到重复调用"; // 生成稳定防循环 Observation，避免重复副作用。
+            } // 结束工具签名首次执行判断分支。
             output.tryEmitNext(AgentStreamEvent.toolEnd(toolCall.name(), toolCall.id(), observation)); // 在执行后输出可关联的工具结束事件。
             responses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolCall.name(), observation)); // 用原调用编号创建模型可理解的工具响应。
         } // 结束本轮有序工具调用循环。
@@ -122,6 +145,10 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             ReactRunContext context, // 接收保护单次终止的运行上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收最终文本和完成事件的输出通道。
             String answer) { // 接收模型生成的完整最终回答。
+        if (answer == null || answer.isBlank()) { // 最终文本为空时前端和用户都无法得到有效结果。
+            finishWithError(conversationId, context, output, "模型未返回最终答案"); // 将无效模型结果转换成稳定错误终止协议。
+            return; // 停止正常完成流程，避免继续发送空 text 事件。
+        } // 结束空最终答案保护分支。
         if (context.tryFinish()) { // 只有第一个终止路径可以输出并关闭协议流。
             tasks.complete(conversationId); // 先释放会话占用，使任务状态与即将结束的流一致。
             output.tryEmitNext(AgentStreamEvent.text(answer)); // 阶段二使用单个文本事件发送完整最终答案。

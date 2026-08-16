@@ -15,6 +15,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -80,7 +84,93 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
                 .containsExactly("call-1", "call-2"); // 断言 ToolResponseMessage 保留模型调用顺序。
     } // 结束多工具串行执行测试。
 
-    private ManualReactAgent agent(ScriptedModel model, List<ToolCallback> callbacks, InMemoryTaskRegistry tasks) { // 统一组装测试所需的手写 Agent。
+    @Test
+    void skipsRepeatedToolExecutionButStillReturnsObservationEvents() { // 验证相同工具签名不会反复产生真实副作用。
+        AssistantMessage repeated = decision(call("call-1", "weather", " {\"city\":\"北京\"} ")); // 创建首轮带首尾空格的调用。
+        AssistantMessage repeatedAgain = decision(call("call-2", "weather", "{\"city\":\"北京\"}")); // 创建下一轮语义相同的调用。
+        ScriptedModel model = new ScriptedModel(repeated, repeatedAgain, new AssistantMessage("已根据第一次结果回答。")); // 配置重复调用后的最终回答。
+        AtomicInteger executions = new AtomicInteger(); // 记录工具实现真正被调用的次数。
+        ToolCallback weather = callback("weather", arguments -> { // 创建带可观察副作用计数的天气回调。
+            executions.incrementAndGet(); // 每次真实进入回调时增加计数。
+            return "北京：晴，25℃"; // 返回稳定天气 Observation。
+        }); // 结束计数天气回调定义。
+        ManualReactAgent agent = agent(model, List.of(weather), new InMemoryTaskRegistry()); // 组装重复调用测试 Agent。
+
+        List<AgentStreamEvent> events = agent.stream("conversation-repeat", "重复查询") // 执行完整重复调用场景。
+                .collectList() // 收集有限事件流以检查重复调用的两个生命周期事件。
+                .block(Duration.ofSeconds(3)); // 设置等待上限并取得事件列表。
+
+        assertThat(executions).hasValue(1); // 断言真实工具只执行第一次调用。
+        assertThat(events).contains( // 断言重复调用仍有可观察的开始和结束事件。
+                AgentStreamEvent.toolStart("weather", "call-2", "{\"city\":\"北京\"}"), // 保留模型第二次调用的独立编号。
+                AgentStreamEvent.toolEnd("weather", "call-2", "工具调用已跳过：检测到重复调用")); // 用明确 Observation 告诉模型重复被阻止。
+        assertThat(events).endsWith(AgentStreamEvent.text("已根据第一次结果回答。"), AgentStreamEvent.complete()); // 断言重复防护后循环仍能正常总结。
+    } // 结束重复工具调用防护测试。
+
+    @Test
+    void disablesToolsAndForcesFinalAnswerAfterFourRounds() { // 验证达到循环上限后只允许模型总结已有 Observation。
+        ScriptedModel model = new ScriptedModel( // 配置四轮工具调用和一次收尾回答。
+                decision(call("call-1", "weather", "{\"round\":1}")), // 配置第一轮 Action。
+                decision(call("call-2", "weather", "{\"round\":2}")), // 配置第二轮 Action。
+                decision(call("call-3", "weather", "{\"round\":3}")), // 配置第三轮 Action。
+                decision(call("call-4", "weather", "{\"round\":4}")), // 配置第四轮 Action。
+                new AssistantMessage("根据现有工具结果完成总结。")); // 配置关闭工具后的最终文本。
+        ToolCallback weather = callback("weather", arguments -> "观察结果 " + arguments); // 创建每轮均返回稳定文本的测试工具。
+        ManualReactAgent agent = agent(model, List.of(weather), new InMemoryTaskRegistry()); // 组装达到轮次上限的 Agent。
+
+        List<AgentStreamEvent> events = agent.stream("conversation-limit", "持续调用工具") // 执行直到强制收尾的完整循环。
+                .collectList() // 收集全部事件以检查最终输出。
+                .block(Duration.ofSeconds(3)); // 设置有限等待时间。
+
+        assertThat(model.toolFlags).containsExactly(true, true, true, true, false); // 断言第五次决策关闭工具能力。
+        assertThat(model.messageSnapshots.getLast().getLast()).isInstanceOf(org.springframework.ai.chat.messages.UserMessage.class); // 断言收尾前追加了明确用户指令。
+        assertThat(model.messageSnapshots.getLast().getLast().getText()).contains("立即总结"); // 断言收尾指令要求基于已有观察作答。
+        assertThat(events).endsWith(AgentStreamEvent.text("根据现有工具结果完成总结。"), AgentStreamEvent.complete()); // 断言上限不是错误，而是稳定最终回答。
+    } // 结束最大轮次强制收尾测试。
+
+    @Test
+    void convertsEmptyFinalAnswerAndModelFailureIntoTerminalEvents() { // 验证不可恢复的模型结果使用统一错误终止协议。
+        ManualReactAgent emptyAnswerAgent = agent( // 组装返回空白最终文本的 Agent。
+                new ScriptedModel(new AssistantMessage("  ")), // 配置模型产生无效空白回答。
+                List.of(), // 空白回答场景不需要工具。
+                new InMemoryTaskRegistry()); // 使用独立任务注册表。
+        ReactModelPort failingModel = (messages, toolsEnabled) -> { // 创建调用时直接失败的模型端口。
+            throw new IllegalStateException("model unavailable"); // 模拟外部模型 API 故障。
+        }; // 结束失败模型定义。
+        ManualReactAgent failingAgent = new ManualReactAgent(failingModel, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry()); // 组装模型异常 Agent。
+
+        StepVerifier.create(emptyAnswerAgent.stream("conversation-empty", "回答我")) // 订阅空白最终回答场景。
+                .expectNext(AgentStreamEvent.error("模型未返回最终答案")) // 断言空白文本被视为不可恢复模型结果。
+                .expectNext(AgentStreamEvent.complete()) // 断言错误之后仍发送统一完成事件。
+                .verifyComplete(); // 断言流正常关闭。
+        StepVerifier.create(failingAgent.stream("conversation-failure", "回答我")) // 订阅模型抛出异常场景。
+                .expectNext(AgentStreamEvent.error("model unavailable")) // 断言模型异常消息被转换为业务错误事件。
+                .expectNext(AgentStreamEvent.complete()) // 断言模型失败也发送完成事件。
+                .verifyComplete(); // 断言流不会以 Reactor onError 泄漏框架异常。
+    } // 结束空回答与模型异常测试。
+
+    @Test
+    void rejectsConcurrentConversationAndEmitsCancellationProtocol() throws Exception { // 验证同会话互斥和主动停止使用稳定生命周期协议。
+        BlockingModel model = new BlockingModel(); // 创建会一直阻塞到被停止的模型端口。
+        InMemoryTaskRegistry tasks = new InMemoryTaskRegistry(); // 创建供测试直接触发停止操作的任务注册表。
+        ManualReactAgent agent = agent(model, List.of(), tasks); // 组装无工具的阻塞 Agent。
+        CompletableFuture<List<AgentStreamEvent>> firstRun = agent.stream("conversation-blocking", "等待") // 创建占用目标会话的第一条事件流。
+                .collectList() // 收集主动取消后应产生的有限终止序列。
+                .toFuture(); // 异步订阅，避免当前测试线程被模型阻塞。
+        assertThat(model.entered.await(2, TimeUnit.SECONDS)).isTrue(); // 等待模型已进入阻塞调用，确保任务确实处于运行中。
+
+        StepVerifier.create(agent.stream("conversation-blocking", "并发请求")) // 使用相同会话编号发起第二次订阅。
+                .expectNext(AgentStreamEvent.error("conversation is already running")) // 断言重复任务在调用模型前被拒绝。
+                .expectNext(AgentStreamEvent.complete()) // 断言并发冲突也有完整终止协议。
+                .verifyComplete(); // 断言冲突流立即关闭。
+        assertThat(tasks.cancel("conversation-blocking")).isTrue(); // 通过与 HTTP 停止接口相同的注册表入口取消首个任务。
+        assertThat(firstRun.get(2, TimeUnit.SECONDS)).containsExactly( // 等待并检查仍连接客户端收到的取消序列。
+                AgentStreamEvent.error("request cancelled"), // 主动停止先输出稳定取消原因。
+                AgentStreamEvent.complete()); // 主动停止随后输出完成事件并关闭流。
+        assertThat(tasks.hasRunningTask("conversation-blocking")).isFalse(); // 断言取消后会话任务已被释放。
+    } // 结束并发保护和主动取消测试。
+
+    private ManualReactAgent agent(ReactModelPort model, List<ToolCallback> callbacks, InMemoryTaskRegistry tasks) { // 统一组装支持任意假模型端口的手写 Agent。
         return new ManualReactAgent(model, new AgentToolRegistry(callbacks), tasks); // 注入脚本模型、真实注册表和独立任务生命周期组件。
     } // 结束测试 Agent 工厂方法。
 
@@ -114,6 +204,7 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
     private static final class ScriptedModel implements ReactModelPort { // 定义按队列返回预设助手消息的假模型。
         private final Queue<AssistantMessage> decisions; // 保存尚未返回的脚本决策队列。
         private final List<List<Message>> messageSnapshots = new ArrayList<>(); // 保存每轮模型收到的不可变消息快照。
+        private final List<Boolean> toolFlags = new ArrayList<>(); // 保存每轮是否向模型启用工具的状态。
 
         private ScriptedModel(AssistantMessage... decisions) { // 接收测试场景按时间顺序配置的模型决策。
             this.decisions = new ArrayDeque<>(List.of(decisions)); // 复制为可依次移除的队列。
@@ -122,9 +213,26 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         @Override
         public AssistantMessage decide(List<Message> messages, boolean toolsEnabled) { // 根据脚本返回下一条模型决策。
             messageSnapshots.add(List.copyOf(messages)); // 在返回前保存本轮完整上下文快照。
+            toolFlags.add(toolsEnabled); // 记录本轮工具开关以验证强制收尾行为。
             return decisions.remove(); // 移除并返回队首助手消息，额外调用会让测试立即失败。
         } // 结束脚本模型决策方法。
     } // 结束脚本模型类型。
+
+    private static final class BlockingModel implements ReactModelPort { // 定义用于制造停止竞争的可中断阻塞模型。
+        private final CountDownLatch entered = new CountDownLatch(1); // 在模型调用开始时通知测试线程可以发起取消。
+
+        @Override
+        public AssistantMessage decide(List<Message> messages, boolean toolsEnabled) { // 模拟无法立刻返回的同步模型 API。
+            entered.countDown(); // 标记 boundedElastic 工作者已经进入模型调用。
+            try { // 等待任务订阅被 dispose 后产生线程中断。
+                new CountDownLatch(1).await(); // 使用永不主动释放的闩锁保持模型调用阻塞。
+                return new AssistantMessage("不应返回"); // 理论上不可到达，满足编译器返回值要求。
+            } catch (InterruptedException error) { // worker.dispose 会中断当前 boundedElastic 任务。
+                Thread.currentThread().interrupt(); // 恢复中断标记以遵守 Java 并发约定。
+                throw new IllegalStateException("blocking model interrupted", error); // 把中断转换成适配器可能产生的运行时失败。
+            } // 结束阻塞等待异常处理。
+        } // 结束阻塞模型决策方法。
+    } // 结束阻塞测试模型类型。
 
     @FunctionalInterface
     private interface ToolExecutor { // 定义测试工具可用 Lambda 提供的执行契约。
