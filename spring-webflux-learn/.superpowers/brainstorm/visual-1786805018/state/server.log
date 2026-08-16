@@ -1,0 +1,3 @@
+{"type":"server-started","port":54276,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:54276","screen_dir":"D:\\develop\\CodeProject\\LLM\\LLM-LEARN-JAVA\\spring-webflux-learn\\.superpowers\\brainstorm\\visual-1786805018\\content","state_dir":"D:\\develop\\CodeProject\\LLM\\LLM-LEARN-JAVA\\spring-webflux-learn\\.superpowers\\brainstorm\\visual-1786805018\\state"}
+{"type":"screen-added","file":"D:\\develop\\CodeProject\\LLM\\LLM-LEARN-JAVA\\spring-webflux-learn\\.superpowers\\brainstorm\\visual-1786805018\\content\\waiting-1.html"}
+{"type":"server-stopped","reason":"owner process exited"}

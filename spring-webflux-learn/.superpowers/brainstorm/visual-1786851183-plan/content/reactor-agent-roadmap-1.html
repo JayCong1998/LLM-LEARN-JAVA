@@ -1,0 +1,36 @@
+<h2>面向 Agent 开发的 Reactor 学习路线</h2>
+<p class="subtitle">每节一个可直接运行的 main 示例；先观察日志与线程，再解释 API 和使用边界。</p>
+
+<div class="section">
+  <span class="label">基础层：掌握流是什么</span>
+  <div class="cards">
+    <div class="card"><div class="card-body"><h3>01 信号与订阅</h3><p>onNext / onError / onComplete，冷流与热流，Mono / Flux。</p></div></div>
+    <div class="card"><div class="card-body"><h3>02 变换与组合</h3><p>map、flatMap、filter、concat、merge、zip、switchMap。</p></div></div>
+    <div class="card"><div class="card-body"><h3>03 调度与上下文</h3><p>delay、subscribeOn、publishOn、Scheduler、Context。</p></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <span class="label">可靠性层：控制生命周期与压力</span>
+  <div class="cards">
+    <div class="card"><div class="card-body"><h3>04 Disposable 与取消</h3><p>订阅句柄、取消 Token 流、doFinally、usingWhen。</p></div></div>
+    <div class="card"><div class="card-body"><h3>05 Sinks 与热事件</h3><p>unicast、multicast、replay，推送工具进度与中间事件。</p></div></div>
+    <div class="card"><div class="card-body"><h3>06 错误、超时与重试</h3><p>onErrorResume、timeout、Retry.backoff、降级与幂等意识。</p></div></div>
+    <div class="card"><div class="card-body"><h3>07 背压与限流</h3><p>request、limitRate、buffer、drop、latest，防止慢客户端拖垮流。</p></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <span class="label">Agent 应用层：将原理用于模型与工具</span>
+  <div class="cards">
+    <div class="card"><div class="card-body"><h3>08 LLM Token 流</h3><p>模拟流式输出、SSE 事件、用户取消与会话资源释放。</p></div></div>
+    <div class="card"><div class="card-body"><h3>09 并发工具调用</h3><p>flatMap 并发度、结果汇聚、顺序保证、超时隔离。</p></div></div>
+    <div class="card"><div class="card-body"><h3>10 多 Agent 编排</h3><p>Sinks 汇聚 Agent 事件，状态流、完成条件与错误传播。</p></div></div>
+    <div class="card"><div class="card-body"><h3>11 Spring AI 落地</h3><p>把 Token 流与工具流接入 WebFlux，形成可调用的 Agent API。</p></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <span class="label">最终项目</span>
+  <p>实现一个具有流式回答、并发工具、取消、超时、背压保护与事件日志的迷你 Agent。</p>
+</div>

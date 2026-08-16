@@ -3,12 +3,10 @@ spring:
     name: dodo-agent-learn
   ai:
     openai:
-      api-key: ${DODO_AGENT_OPENAI_API_KEY:}
-      base-url: ${DODO_AGENT_OPENAI_BASE_URL:https://api.openai.com}
+      api-key: sk-ws-H.EEYELEX.vh6R.MEQCIBd5JOBgoMgetuPaFikrAxBJfIQ-dutSSC35GWT837zPAiBJPaovXIuF8C5uTyqAMe07bF2nDlOnpYC6QNE0N4vFyw
+      base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
-          model: ${DODO_AGENT_CHAT_MODEL:gpt-4o-mini}
-          temperature: 0.2
-
+          model: qwen3.7-max-2026-05-17
 server:
   port: ${SERVER_PORT:8080}
