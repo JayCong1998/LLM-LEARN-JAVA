@@ -1,5 +1,6 @@
 package com.jaycong.dodo.agent; // 将手写 ReAct 行为测试放在核心 Agent 包中。
 
+import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import org.junit.jupiter.api.Test;
@@ -137,7 +138,7 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         ReactModelPort failingModel = (messages, toolsEnabled) -> { // 创建调用时直接失败的模型端口。
             throw new IllegalStateException("model unavailable"); // 模拟外部模型 API 故障。
         }; // 结束失败模型定义。
-        ManualReactAgent failingAgent = new ManualReactAgent(failingModel, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry()); // 组装模型异常 Agent。
+        ManualReactAgent failingAgent = new ManualReactAgent(failingModel, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry(), new InMemoryConversationMemory()); // 组装使用独立空记忆的模型异常 Agent。
 
         StepVerifier.create(emptyAnswerAgent.stream("conversation-empty", "回答我")) // 订阅空白最终回答场景。
                 .expectNext(AgentStreamEvent.error("模型未返回最终答案")) // 断言空白文本被视为不可恢复模型结果。
@@ -171,7 +172,7 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
     } // 结束并发保护和主动取消测试。
 
     private ManualReactAgent agent(ReactModelPort model, List<ToolCallback> callbacks, InMemoryTaskRegistry tasks) { // 统一组装支持任意假模型端口的手写 Agent。
-        return new ManualReactAgent(model, new AgentToolRegistry(callbacks), tasks); // 注入脚本模型、真实注册表和独立任务生命周期组件。
+        return new ManualReactAgent(model, new AgentToolRegistry(callbacks), tasks, new InMemoryConversationMemory()); // 注入脚本模型、真实注册表、任务生命周期组件和独立空记忆。
     } // 结束测试 Agent 工厂方法。
 
     private AssistantMessage decision(AssistantMessage.ToolCall... calls) { // 创建只有工具调用而没有最终文本的助手决策。

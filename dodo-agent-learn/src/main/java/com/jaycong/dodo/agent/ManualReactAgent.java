@@ -1,5 +1,7 @@
 package com.jaycong.dodo.agent; // 将手写 ReAct 编排器放在 Agent 核心包中。
 
+import com.jaycong.dodo.memory.ConversationMemory;
+import com.jaycong.dodo.memory.ConversationTurn;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -29,14 +31,17 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     private final ReactModelPort model; // 保存一次生成助手决策的抽象模型端口。
     private final AgentToolRegistry tools; // 保存工具声明和实际执行共用的注册表。
     private final InMemoryTaskRegistry tasks; // 保存会话互斥、停止入口和工作订阅句柄。
+    private final ConversationMemory memory; // 保存按会话读取跨请求历史的抽象记忆端口。
 
-    public ManualReactAgent( // 通过构造器显式声明 ReAct 循环的三个边界依赖。
+    public ManualReactAgent( // 通过构造器显式声明 ReAct 循环的四个边界依赖。
             ReactModelPort model, // 接收可替换的模型决策端口。
             AgentToolRegistry tools, // 接收名称稳定的本地工具目录。
-            InMemoryTaskRegistry tasks) { // 接收进程内任务生命周期注册表并结束参数列表。
+            InMemoryTaskRegistry tasks, // 接收进程内任务生命周期注册表。
+            ConversationMemory memory) { // 接收可替换的跨请求会话记忆端口并结束参数列表。
         this.model = model; // 保存模型端口供每轮同步决策使用。
         this.tools = tools; // 保存工具注册表供 Action 执行和 Observation 生成使用。
         this.tasks = tasks; // 保存任务注册表供并发保护和资源释放使用。
+        this.memory = memory; // 保存记忆端口供每次运行开始时读取一次历史快照。
     } // 结束手写 Agent 构造方法。
 
     /**
@@ -46,7 +51,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     public Flux<AgentStreamEvent> stream(String conversationId, String message) { // 定义 Agent 运行，但在客户端订阅前不调用模型。
         return Flux.defer(() -> { // 为每个真实 HTTP 订阅隔离全部可变状态。
             ReactRunContext context = new ReactRunContext( // 创建只属于本次请求的 ReAct 上下文。
-                    List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(message)), // 按系统规则和用户问题初始化消息历史。
+                    List.of(), // 暂以空消息初始化，历史读取和消息装配将在阻塞工作线程中完成。
                     MAX_DECISION_ROUNDS); // 应用固定四轮工具决策上限。
             Sinks.Many<AgentStreamEvent> output = Sinks.many().unicast().onBackpressureBuffer(); // 创建单客户端可写事件通道并缓冲短暂消费延迟。
             Runnable onCancel = () -> { // 定义停止接口成功后需要执行的稳定协议收尾回调。
@@ -67,7 +72,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
              * ChatClient.call 是阻塞操作，因此整个 while 循环必须离开 WebFlux 事件线程。
              * 一个运行只使用一个 boundedElastic 工作者，工具调用自然保持模型给出的顺序。
              */
-            var worker = Mono.fromRunnable(() -> runLoop(conversationId, context, output)) // 把同步 ReAct 循环包装成可取消的 Reactor 工作单元。
+            var worker = Mono.fromRunnable(() -> runLoop(conversationId, message, context, output)) // 把历史读取和同步 ReAct 循环包装成可取消工作单元。
                     .subscribeOn(Schedulers.boundedElastic()) // 将模型阻塞调用调度到有界弹性线程池。
                     .subscribe(); // 启动后台循环并取得停止接口可以 dispose 的订阅句柄。
             tasks.attach(conversationId, worker); // 把工作订阅绑定到已注册任务，处理注册后立即取消的竞争。
@@ -88,9 +93,14 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
      */
     private void runLoop( // 定义只由 boundedElastic 工作者调用的同步状态机。
             String conversationId, // 接收任务注册与清理使用的会话编号。
+            String currentUserMessage, // 接收本次 HTTP 请求的用户问题，供历史之后追加。
             ReactRunContext context, // 接收本次运行独享的消息和状态上下文。
             Sinks.Many<AgentStreamEvent> output) { // 接收向 SSE 下游写入事件的单订阅 Sink。
         try { // 捕获模型边界的意外异常并保证任务能够关闭。
+            initializeMessages(conversationId, currentUserMessage, context); // 在阻塞工作线程读取快照并按角色顺序构造初始上下文。
+            if (context.isCancelled()) { // 历史读取期间客户端可能已经主动停止当前任务。
+                return; // 丢弃已经加载的快照，不再调用模型或产生普通终止事件。
+            } // 结束历史加载后的取消保护分支。
             while (!context.isCancelled() && context.tryStartDecisionRound()) { // 在未取消且未超过四轮时继续请求下一步决策。
                 AssistantMessage assistant = model.decide(context.messages(), true); // 携带完整消息历史并允许模型选择工具。
                 if (context.isCancelled()) { // 模型阻塞返回时任务可能已被停止，因此结果落库前再次检查。
@@ -120,6 +130,23 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             finishWithError(conversationId, context, output, errorMessage(error)); // 转换为稳定错误和完成事件，避免 SSE 悬挂。
         } // 结束同步 ReAct 循环异常边界。
     } // 结束 ReAct 主循环方法。
+
+    /**
+     * 在每次运行开始时只读取一次跨请求历史，并转换成 Spring AI 的角色消息。
+     * 工具调用和工具响应不会出现在 ConversationTurn 中，因此不会被错误带入下一次 HTTP 请求。
+     */
+    private void initializeMessages( // 定义跨请求历史到单次运行上下文的转换边界。
+            String conversationId, // 接收需要读取历史的会话编号。
+            String currentUserMessage, // 接收必须放在全部历史之后的当前用户问题。
+            ReactRunContext context) { // 接收需要按时间顺序追加消息的本次运行上下文。
+        List<ConversationTurn> historySnapshot = memory.get(conversationId); // 只读取一次不可变快照，隔离运行期间的追加或清空。
+        context.addMessage(new SystemMessage(SYSTEM_PROMPT)); // 始终先加入系统规则，建立整段模型上下文的行为边界。
+        for (ConversationTurn turn : historySnapshot) { // 按窗口保存的时间顺序回放每轮完整问答。
+            context.addMessage(new UserMessage(turn.userContent())); // 把历史问题恢复成模型可识别的用户角色消息。
+            context.addMessage(new AssistantMessage(turn.assistantContent())); // 把对应最终回答恢复成助手角色消息并保持问答配对。
+        } // 结束历史轮次回放循环。
+        context.addMessage(new UserMessage(currentUserMessage)); // 最后加入本次问题，使模型明确当前需要处理的输入。
+    } // 结束初始消息装配方法。
 
     private void executeToolCalls( // 定义一轮内按顺序执行全部工具调用并追加统一响应消息的过程。
             ReactRunContext context, // 接收需要登记消息历史的本轮上下文。
