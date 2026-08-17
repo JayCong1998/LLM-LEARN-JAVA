@@ -1,7 +1,8 @@
 package com.jaycong.dodo.web; // 将控制器放在 Web 边界包中，避免 HTTP 细节进入 Agent 核心。
 
 import com.jaycong.dodo.agent.AgentStreamEvent;
-import com.jaycong.dodo.agent.ManualReactAgent;
+import com.jaycong.dodo.agent.ManualReactCallAgent;
+import com.jaycong.dodo.agent.ManualReactStreamAgent;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -24,11 +25,13 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @RequestMapping("/api/agent")
 public class ChatController { // 定义流式对话和任务停止两个 HTTP 边界操作。
 
-    private final ManualReactAgent agent; // 保存手写 ReAct Agent，用于创建包含工具生命周期的对话事件流。
+    private final ManualReactCallAgent callAgent; // 保存保留完整最终文本行为的对照 Agent。
+    private final ManualReactStreamAgent streamAgent; // 保存页面默认使用的最终文本片段流 Agent。
     private final InMemoryTaskRegistry tasks; // 保存任务注册表，用于执行显式取消操作。
 
-    public ChatController(ManualReactAgent agent, InMemoryTaskRegistry tasks) { // 通过构造器显式声明阶段二控制器依赖。
-        this.agent = agent; // 保存 Spring 注入的手写 ReAct Agent 实例。
+    public ChatController(ManualReactCallAgent callAgent, ManualReactStreamAgent streamAgent, InMemoryTaskRegistry tasks) { // 通过构造器显式声明两种回答模式和停止依赖。
+        this.callAgent = callAgent; // 保存仅用于对照接口的一次性文本 Agent 实例。
+        this.streamAgent = streamAgent; // 保存页面默认使用的最终片段流 Agent 实例。
         this.tasks = tasks; // 保存与 Agent 共用的内存任务注册表实例。
     } // 结束控制器构造方法。
 
@@ -51,11 +54,19 @@ public class ChatController { // 定义流式对话和任务停止两个 HTTP �
                     BAD_REQUEST, // 把非法输入映射为 HTTP 400，而不是内部服务器错误。
                     "conversationId and message must not be blank"); // 提供稳定的参数错误说明并结束异常构造。
         } // 结束请求参数校验分支。
-        return agent.stream(conversationId, message) // 把合法参数交给 Agent，取得与传输协议无关的事件流。
+        return streamAgent.stream(conversationId, message) // 把合法参数交给页面默认的流式 Agent，取得与传输协议无关的事件流。
                 .map(event -> ServerSentEvent.builder(event) // 把每个 Agent 事件包装为一个 SSE 帧，并保留原对象作为 data。
                         .event(event.type()) // 同步设置 SSE 的 event 字段，方便客户端按事件类型识别消息。
                         .build()); // 构建不可变 SSE 对象，并结束事件映射链。
     } // 结束流式对话接口方法。
+
+    @GetMapping(value = "/chat/call", produces = MediaType.TEXT_EVENT_STREAM_VALUE) // 保留旧一次性最终文本接口供后续学习对照。
+    public Flux<ServerSentEvent<AgentStreamEvent>> call(@RequestParam String conversationId, @RequestParam String message) { // 接收与 stream 接口相同的请求参数。
+        if (conversationId.isBlank() || message.isBlank()) { // 在创建对照 Agent 任务前同样拒绝空白输入。
+            throw new ResponseStatusException(BAD_REQUEST, "conversationId and message must not be blank"); // 保持两个接口的 HTTP 参数错误语义一致。
+        } // 结束对照接口参数校验分支。
+        return callAgent.stream(conversationId, message).map(event -> ServerSentEvent.builder(event).event(event.type()).build()); // 将 call Agent 的事件转换为相同 SSE 帧格式。
+    } // 结束一次性回答对照接口方法。
 
     /**
      * 根据会话编号停止一个正在运行的 Agent 任务。

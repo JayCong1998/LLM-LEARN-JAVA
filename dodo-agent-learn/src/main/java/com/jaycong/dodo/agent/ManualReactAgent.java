@@ -13,7 +13,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -28,7 +27,6 @@ import java.util.List;
  * 显式实现“模型决策 -> 人工执行工具 -> Observation 回填 -> 再次决策”的 ReAct 循环。
  * 模型同步调用和本地工具都在 boundedElastic 工作线程串行执行，HTTP 层只消费稳定 AgentStreamEvent。
  */
-@Service
 public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的核心 Agent 编排器。
 
     private static final int MAX_DECISION_ROUNDS = 4; // 限制允许工具的模型决策最多四轮，防止无限循环。
@@ -38,31 +36,36 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     private final InMemoryTaskRegistry tasks; // 保存会话互斥、停止入口和工作订阅句柄。
     private final ConversationMemory memory; // 保存按会话读取跨请求历史的抽象记忆端口。
     private final SuccessfulAgentRunPersistence successfulRuns; // 保存只接收完整成功运行的轨迹持久化端口。
+    private final FinalAnswerStreamPort finalAnswerStreamPort; // 保存仅供流式版本在最终阶段产生文本片段的可选端口。
 
     public ManualReactAgent(ReactModelPort model, AgentToolRegistry tools, InMemoryTaskRegistry tasks, ConversationMemory memory) { // 为既有独立教学测试保留四参数构造入口。
-        this(model, tools::execute, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 兼容入口继续直连注册表，避免既有测试被生产超时策略干扰。
+        this(model, tools::execute, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer())), null); // 兼容入口继续直连注册表，避免既有测试被生产超时策略干扰。
     } // 结束兼容测试构造方法。
 
     public ManualReactAgent(ReactModelPort model, ToolExecutionPort toolExecutor, InMemoryTaskRegistry tasks, ConversationMemory memory) { // 为需要注入受控执行端口的 Agent 测试提供四参数入口。
-        this(model, toolExecutor, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 复用完整构造器并保留既有测试的问答持久化断言。
+        this(model, toolExecutor, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer())), null); // 复用完整构造器并保留既有测试的问答持久化断言。
     } // 结束测试执行端口构造方法。
 
     public ManualReactAgent(ReactModelPort model, AgentToolRegistry tools, InMemoryTaskRegistry tasks, ConversationMemory memory, SuccessfulAgentRunPersistence successfulRuns) { // 为既有完整运行轨迹测试保留注册表形式的五参数组装入口。
-        this(model, tools::execute, tasks, memory, successfulRuns); // 将旧注册表适配为执行端口，避免测试意外引入真实三秒等待。
+        this(model, tools::execute, tasks, memory, successfulRuns, null); // 将旧注册表适配为执行端口，避免测试意外引入真实三秒等待。
     } // 结束注册表形式的完整测试构造方法。
 
-    @Autowired
     public ManualReactAgent( // 通过构造器显式声明 ReAct 循环的四个边界依赖。
             ReactModelPort model, // 接收可替换的模型决策端口。
             ToolExecutionPort toolExecutor, // 接收负责超时和取消传播的工具执行端口。
             InMemoryTaskRegistry tasks, // 接收进程内任务生命周期注册表。
             ConversationMemory memory, // 接收只读取跨请求问答历史的端口。
             SuccessfulAgentRunPersistence successfulRuns) { // 接收只持久化完整成功运行的端口并结束参数列表。
+        this(model, toolExecutor, tasks, memory, successfulRuns, null); // 默认关闭最终回答流，使既有 call 语义保持不变。
+    } // 结束默认最终回答模式构造方法。
+
+    public ManualReactAgent(ReactModelPort model, ToolExecutionPort toolExecutor, InMemoryTaskRegistry tasks, ConversationMemory memory, SuccessfulAgentRunPersistence successfulRuns, FinalAnswerStreamPort finalAnswerStreamPort) { // 接收可选流端口以供拆分后的 stream Agent 复用协调逻辑。
         this.model = model; // 保存模型端口供每轮同步决策使用。
         this.toolExecutor = toolExecutor; // 保存执行端口供 Action 限时运行和 Observation 生成使用。
         this.tasks = tasks; // 保存任务注册表供并发保护和资源释放使用。
         this.memory = memory; // 保存记忆端口供每次运行开始时读取一次历史快照。
         this.successfulRuns = successfulRuns; // 保存轨迹端口供最终答案成功后一次性提交完整记录。
+        this.finalAnswerStreamPort = finalAnswerStreamPort; // 保存可选流端口，空值代表保留一次性最终文本模式。
     } // 结束手写 Agent 构造方法。
 
     /**
@@ -130,7 +133,11 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 } // 结束模型返回后的取消保护分支。
                 context.addMessage(assistant); // 把包含文本或 ToolCall 的原始助手消息加入历史。
                 if (!assistant.hasToolCalls()) { // 没有 Action 表示模型认为已经可以给出最终答案。
-                    finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText(), startedAtNanos); // 持久化完整轨迹后输出最终文本并执行唯一正常收尾。
+                    if (finalAnswerStreamPort == null) { // call Agent 保留同步模型给出的单个最终文本事件。
+                        finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText(), startedAtNanos, true); // 持久化完整轨迹后输出最终文本并执行唯一正常收尾。
+                    } else { // stream Agent 改由专用端口产生最终片段。
+                        finishStreamingSuccessfully(conversationId, currentUserMessage, context, output, startedAtNanos); // 逐片段输出并只在完整结果正常结束后持久化。
+                    } // 结束最终回答模式选择分支。
                     return; // 终止循环，避免最终答案之后再次请求模型。
                 } // 结束最终答案判断分支。
                 if (executeToolCalls(conversationId, context, output, assistant.getToolCalls(), startedAtNanos)) { // 串行执行本轮全部 Action，并识别工具等待期间发生的取消。
@@ -148,7 +155,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     finishWithError(conversationId, context, output, "模型在强制收尾阶段仍请求工具"); // 使用稳定错误终止而不执行第五轮工具。
                     return; // 阻止异常 ToolCall 进入实际工具执行路径。
                 } // 结束强制收尾工具调用保护分支。
-                finishSuccessfully(conversationId, currentUserMessage, context, output, finalAssistant.getText(), startedAtNanos); // 持久化完整轨迹后输出基于已有 Observation 的最终答案。
+                finishSuccessfully(conversationId, currentUserMessage, context, output, finalAssistant.getText(), startedAtNanos, true); // 持久化完整轨迹后输出基于已有 Observation 的最终答案。
             } // 结束最大轮次强制收尾分支。
         } catch (Exception error) { // 捕获模型适配器或循环代码抛出的不可恢复异常。
             finishWithError(conversationId, context, output, errorMessage(error)); // 转换为稳定错误和完成事件，避免 SSE 悬挂。
@@ -212,7 +219,8 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             ReactRunContext context, // 接收保护单次终止的运行上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收最终文本和完成事件的输出通道。
             String answer, // 接收模型生成的完整最终回答。
-            long startedAtNanos) { // 接收本次运行的单调计时起点。
+            long startedAtNanos, // 接收本次运行的单调计时起点。
+            boolean emitAnswer) { // 接收是否在持久化后输出一次完整文本事件。
         if (answer == null || answer.isBlank()) { // 最终文本为空时前端和用户都无法得到有效结果。
             finishWithError(conversationId, context, output, "模型未返回最终答案"); // 将无效模型结果转换成稳定错误终止协议。
             return; // 停止正常完成流程，避免继续发送空 text 事件。
@@ -233,11 +241,30 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 return; // 阻止未成功保存的答案继续作为 text 事件发给客户端。
             } // 结束记忆保存异常处理分支。
             tasks.complete(conversationId); // 完整运行已写入后释放会话占用，使任务状态与即将结束的流一致。
-            output.tryEmitNext(AgentStreamEvent.text(answer)); // 阶段二使用单个文本事件发送完整最终答案。
+            if (emitAnswer) { // call 模式才在持久化完成后发送一次完整答案。
+                output.tryEmitNext(AgentStreamEvent.text(answer)); // 使用单个文本事件发送完整最终答案。
+            } // 结束完整文本输出分支。
             output.tryEmitNext(AgentStreamEvent.complete()); // 发送显式协议完成事件供前端统一收尾。
             output.tryEmitComplete(); // 关闭 Reactor 流并触发最终清理钩子。
         } // 结束正常终止单次执行保护分支。
     } // 结束正常终止方法。
+
+    private void finishStreamingSuccessfully(String conversationId, String currentUserMessage, ReactRunContext context, Sinks.Many<AgentStreamEvent> output, long startedAtNanos) { // 定义 stream Agent 的最终片段输出与完整结果提交流程。
+        StringBuilder answer = new StringBuilder(); // 聚合已安全发送的非空文本片段，供成功结束后一次性持久化。
+        try { // 捕获模型流异常并转换为既有稳定 SSE 错误协议。
+            for (String fragment : finalAnswerStreamPort.stream(context.messagesWithinBudget()).toIterable()) { // 在 boundedElastic 工作者中顺序消费最终模型片段。
+                if (context.isCancelled()) { // 浏览器断开或停止请求取得终止权时不得继续输出或写入。
+                    return; // 取消路径已由注册表发送 error 和 complete，因此仅停止消费。
+                } // 结束流消费取消保护分支。
+                answer.append(fragment); // 先追加实际片段以保证提交文本与已发送片段保持一致。
+                output.tryEmitNext(AgentStreamEvent.text(fragment)); // 立即向 SSE 下游输出当前最终回答片段。
+            } // 结束模型最终片段消费循环。
+        } catch (Exception error) { // 模型流在正常完成前失败时进入此异常边界。
+            finishWithError(conversationId, context, output, errorMessage(error)); // 失败或空流均不得持久化成功问答。
+            return; // 阻止异常后继续进入成功持久化。
+        } // 结束模型流异常处理。
+        finishSuccessfully(conversationId, currentUserMessage, context, output, answer.toString(), startedAtNanos, false); // 仅在流自然完成且文本非空时一次性持久化完整答案。
+    } // 结束流式最终回答完成方法。
 
     private void finishWithError( // 定义不可恢复模型或循环失败的统一终止序列。
             String conversationId, // 接收需要释放的会话编号。

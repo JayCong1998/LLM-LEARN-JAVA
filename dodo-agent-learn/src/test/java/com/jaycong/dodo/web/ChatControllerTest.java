@@ -1,6 +1,8 @@
 package com.jaycong.dodo.web;
 
-import com.jaycong.dodo.agent.ManualReactAgent;
+import com.jaycong.dodo.agent.FinalAnswerStreamPort;
+import com.jaycong.dodo.agent.ManualReactCallAgent;
+import com.jaycong.dodo.agent.ManualReactStreamAgent;
 import com.jaycong.dodo.agent.ReactModelPort;
 import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
@@ -24,7 +26,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @WebFluxTest(ChatController.class)
-@Import({ManualReactAgent.class, TimedToolExecutor.class, InMemoryTaskRegistry.class, InMemoryConversationMemory.class, ChatControllerTest.FakeModelConfiguration.class})
+@Import({ManualReactCallAgent.class, ManualReactStreamAgent.class, TimedToolExecutor.class, InMemoryTaskRegistry.class, InMemoryConversationMemory.class, ChatControllerTest.FakeModelConfiguration.class})
 class ChatControllerTest {
 
     @Autowired
@@ -40,7 +42,8 @@ class ChatControllerTest {
                 .expectBody(String.class)
                 .value(body -> org.assertj.core.api.Assertions.assertThat(body)
                         .contains("\"type\":\"text\"")
-                        .contains("\"content\":\"model answer\"")
+                        .contains("\"content\":\"model \"") // 断言页面默认 stream 路由逐片段输出最终文本前段。
+                        .contains("\"content\":\"answer\"") // 断言页面默认 stream 路由继续输出最终文本后段。
                         .contains("\"type\":\"tool_start\"") // 断言 SSE 数据包含工具开始事件类型。
                         .contains("\"type\":\"tool_end\"") // 断言 SSE 数据包含工具结束事件类型。
                         .contains("\"toolName\":\"weather\"") // 断言工具生命周期事件携带工具名称。
@@ -100,5 +103,10 @@ class ChatControllerTest {
             return run -> { // 切片只验证 SSE 协议，因此成功写入可安全表现为无副作用。
             }; // 结束无副作用轨迹持久化回调。
         }
+
+        @Bean
+        FinalAnswerStreamPort finalAnswerStreamPort() { // 为 stream Agent 提供无需真实模型连接的确定性最终回答片段流。
+            return messages -> reactor.core.publisher.Flux.just("model ", "answer"); // 返回两段文本以验证 Controller 逐事件写出 SSE。
+        } // 结束最终回答流端口 Bean 创建方法。
     }
 }
