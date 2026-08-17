@@ -33,4 +33,10 @@ class AgentStreamEventTest { // 定义 Agent 对外事件协议的单元测试�
                         "call-1", // 保留相同调用编号，保证开始与结束可以稳定关联。
                         null)); // 工具结束事件无需重复发送已经展示过的输入参数。
     } // 结束工具生命周期协议测试。
+
+    @Test
+    void createsRetryEventWithAttemptAndDelayWithoutToolInputOrObservation() { // 验证重试事件只暴露安全的计划元数据而不重复敏感工具内容。
+        assertThat(AgentStreamEvent.toolRetry("weather", "call-1", 2, 200L)) // 创建即将执行第二次工具尝试的重试事件。
+                .isEqualTo(new AgentStreamEvent("tool_retry", "", "weather", "call-1", null, 2, 200L)); // 断言事件携带关联编号、尝试次数和退避时长。
+    } // 结束工具重试事件协议测试。
 } // 结束 Agent 事件协议测试类。

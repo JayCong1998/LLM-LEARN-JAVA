@@ -184,7 +184,11 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             if (context.markToolExecution(toolCall.name(), toolCall.arguments())) { // 只有标准化签名第一次出现时才允许真实执行。
                 context.recordFirstResponseTimeMillisIfAbsent(elapsedMillis(startedAtNanos)); // 在首个真实工具 Action 对外可见前冻结首响应耗时。
                 output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
-                observation = toolExecutor.execute(toolCall.name(), toolCall.arguments()); // 经过限时执行端口运行本地工具并取得正常、失败或超时 Observation。
+                observation = toolExecutor.execute(toolCall.name(), toolCall.arguments(), (attempt, delayMillis) -> { // 经过可靠性端口执行工具，并接收只含安全元数据的重试计划。
+                    if (!context.isCancelled()) { // 取消已经取得终止权时不能继续向客户端发送迟到重试事件。
+                        output.tryEmitNext(AgentStreamEvent.toolRetry(toolCall.name(), toolCall.id(), attempt, delayMillis)); // 将重试通知转换为可关联的 SSE 事件。
+                    } // 结束重试通知取消保护分支。
+                }); // 结束带重试通知的工具执行调用。
             } else { // 相同工具名和清理首尾空格后的参数已经在本次运行中执行过。
                 output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 保持重复调用原有可观察 SSE 协议。
                 observation = "工具调用已跳过：检测到重复调用"; // 生成稳定防循环 Observation，避免重复副作用。

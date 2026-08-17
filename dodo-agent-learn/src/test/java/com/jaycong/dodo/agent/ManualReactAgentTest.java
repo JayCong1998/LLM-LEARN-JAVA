@@ -4,6 +4,7 @@ import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import com.jaycong.dodo.tool.ToolExecutionPort;
+import com.jaycong.dodo.tool.ToolRetryListener;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -221,6 +222,35 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         assertThat(interrupted.await(2, TimeUnit.SECONDS)).isTrue(); // 断言停止也中断了正在等待的工具端口。
         assertThat(model.messageSnapshots).hasSize(1); // 断言取消后没有再用工具结果请求第二轮模型。
     } // 结束等待工具取消测试。
+
+    @Test
+    void emitsRetryEventAndFeedsFinalRetryObservationBackToModel() { // 验证 Agent 把重试计划暴露为 SSE 并只回填最终工具结果。
+        AssistantMessage toolDecision = decision(call("call-retry", "weather", "{}")); // 创建模型第一轮请求天气工具的 Action。
+        ScriptedModel model = new ScriptedModel(toolDecision, new AssistantMessage("已根据重试后的天气结果回答。")); // 配置收到最终 Observation 后的模型总结。
+        ToolExecutionPort retryingPort = new ToolExecutionPort() { // 创建主动发出一次重试通知的测试端口。
+            @Override
+            public String execute(String toolName, String arguments) { // 实现兼容的两参数单次执行入口。
+                return "晴朗"; // 返回不带通知时的稳定最终 Observation。
+            } // 结束两参数执行入口。
+
+            @Override
+            public String execute(String toolName, String arguments, ToolRetryListener retryListener) { // 实现带通知的重试执行入口。
+                retryListener.onRetry(2, 200L); // 模拟首次超时后即将执行第二次尝试的可靠性通知。
+                return "晴朗"; // 返回第二次尝试成功后的最终 Observation。
+            } // 结束带通知执行入口。
+        }; // 结束测试重试端口定义。
+        ManualReactAgent agent = agent(model, retryingPort, new InMemoryTaskRegistry()); // 组装使用可观察重试端口的 Agent。
+
+        StepVerifier.create(agent.stream("conversation-retry", "查询天气")) // 订阅包含一次工具重试的完整 Agent 运行。
+                .expectNext(AgentStreamEvent.toolStart("weather", "call-retry", "{}")) // 断言真实工具生命周期仍从一次开始事件起始。
+                .expectNext(AgentStreamEvent.toolRetry("weather", "call-retry", 2, 200L)) // 断言首次超时后的计划重试对客户端可见。
+                .expectNext(AgentStreamEvent.toolEnd("weather", "call-retry", "晴朗")) // 断言只为最终成功结果发送一次结束事件。
+                .expectNext(AgentStreamEvent.text("已根据重试后的天气结果回答。")) // 断言模型基于最终 Observation 正常生成回答。
+                .expectNext(AgentStreamEvent.complete()) // 断言重试成功路径仍按正常协议完成。
+                .verifyComplete(); // 断言流没有泄漏内部重试异常。
+        ToolResponseMessage responses = (ToolResponseMessage) model.messageSnapshots.get(1).get(3); // 取得第二轮模型决策收到的聚合工具响应。
+        assertThat(responses.getResponses().getFirst().responseData()).isEqualTo("晴朗"); // 断言模型只收到最终成功 Observation 而非中间超时文本。
+    } // 结束 Agent 重试事件与回填测试。
 
     @Test
     void rejectsOversizedMandatoryContextBeforeCallingModelOrPersistingMemory() { // 验证当前问题与系统提示超过固定预算时不会启动模型或成功持久化。
