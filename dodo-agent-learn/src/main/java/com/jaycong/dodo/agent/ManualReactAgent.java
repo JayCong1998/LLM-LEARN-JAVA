@@ -7,6 +7,7 @@ import com.jaycong.dodo.trace.SuccessfulAgentRunPersistence;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import com.jaycong.dodo.tool.ToolExecutionPort;
+import com.jaycong.dodo.tool.ToolExecutionContext;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -132,7 +133,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText(), startedAtNanos); // 持久化完整轨迹后输出最终文本并执行唯一正常收尾。
                     return; // 终止循环，避免最终答案之后再次请求模型。
                 } // 结束最终答案判断分支。
-                if (executeToolCalls(context, output, assistant.getToolCalls(), startedAtNanos)) { // 串行执行本轮全部 Action，并识别工具等待期间发生的取消。
+                if (executeToolCalls(conversationId, context, output, assistant.getToolCalls(), startedAtNanos)) { // 串行执行本轮全部 Action，并识别工具等待期间发生的取消。
                     return; // 取消已由注册表回调完成协议收尾，禁止继续回填或再次调用模型。
                 } // 结束工具执行取消保护分支。
             } // 结束允许工具的模型决策循环。
@@ -174,6 +175,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     } // 结束初始消息装配方法。
 
     private boolean executeToolCalls( // 定义一轮内按顺序执行全部工具调用并报告是否因取消提前结束。
+            String conversationId, // 接收当前运行的会话编号，供保护链按会话分桶限流。
             ReactRunContext context, // 接收需要登记消息历史的本轮上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收工具开始和结束事件的输出通道。
             List<AssistantMessage.ToolCall> toolCalls, // 接收模型给出的有序工具调用列表。
@@ -184,7 +186,8 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             if (context.markToolExecution(toolCall.name(), toolCall.arguments())) { // 只有标准化签名第一次出现时才允许真实执行。
                 context.recordFirstResponseTimeMillisIfAbsent(elapsedMillis(startedAtNanos)); // 在首个真实工具 Action 对外可见前冻结首响应耗时。
                 output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
-                observation = toolExecutor.execute(toolCall.name(), toolCall.arguments(), (attempt, delayMillis) -> { // 经过可靠性端口执行工具，并接收只含安全元数据的重试计划。
+                ToolExecutionContext executionContext = new ToolExecutionContext(conversationId, toolCall.name(), toolCall.id()); // 构造本次真实调用的会话、工具和关联编号上下文。
+                observation = toolExecutor.execute(executionContext, toolCall.arguments(), (attempt, delayMillis) -> { // 经过可靠性端口执行工具，并接收只含安全元数据的重试计划。
                     if (!context.isCancelled()) { // 取消已经取得终止权时不能继续向客户端发送迟到重试事件。
                         output.tryEmitNext(AgentStreamEvent.toolRetry(toolCall.name(), toolCall.id(), attempt, delayMillis)); // 将重试通知转换为可关联的 SSE 事件。
                     } // 结束重试通知取消保护分支。

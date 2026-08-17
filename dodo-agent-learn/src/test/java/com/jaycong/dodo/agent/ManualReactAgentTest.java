@@ -4,6 +4,7 @@ import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import com.jaycong.dodo.tool.ToolExecutionPort;
+import com.jaycong.dodo.tool.ToolExecutionContext;
 import com.jaycong.dodo.tool.ToolRetryListener;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -22,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -189,6 +191,29 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         ToolResponseMessage responses = (ToolResponseMessage) model.messageSnapshots.get(1).get(3); // 取得第二轮模型调用前聚合的工具响应消息。
         assertThat(responses.getResponses().getFirst().responseData()).isEqualTo("工具执行超时：weather"); // 断言 SSE 展示与模型上下文回填使用同一超时文本。
     } // 结束超时 Observation 回填测试。
+
+    @Test
+    void passesConversationAndToolCallIdentifiersToProtectedToolExecutor() { // 验证 Agent 为保护链提供会话、工具和调用编号三项上下文。
+        ScriptedModel model = new ScriptedModel(decision(call("call-context", "weather", "{}")), new AssistantMessage("已完成")); // 配置一次工具调用后直接总结的模型脚本。
+        AtomicReference<ToolExecutionContext> receivedContext = new AtomicReference<>(); // 保存端口实际收到的完整工具执行上下文。
+        ToolExecutionPort contextAwarePort = new ToolExecutionPort() { // 创建只在上下文执行入口记录参数的测试端口。
+            @Override
+            public String execute(String toolName, String arguments) { // 实现兼容入口以满足工具端口的单一抽象方法。
+                return "不应调用兼容入口"; // 返回可识别文本，避免兼容路径被误认为正确行为。
+            } // 结束兼容执行入口。
+
+            @Override
+            public String execute(ToolExecutionContext context, String arguments, ToolRetryListener retryListener) { // 接收保护链必须依赖的完整上下文。
+                receivedContext.set(context); // 保存上下文供测试在运行结束后精确断言。
+                return "晴朗"; // 返回稳定 Observation 让 ReAct 循环继续完成。
+            } // 结束上下文执行入口。
+        }; // 结束上下文感知测试端口定义。
+        ManualReactAgent agent = agent(model, contextAwarePort, new InMemoryTaskRegistry()); // 组装使用上下文感知端口的 Agent。
+
+        agent.stream("conversation-context", "查询天气").collectList().block(Duration.ofSeconds(3)); // 运行完整工具路径以触发一次端口调用。
+
+        assertThat(receivedContext.get()).isEqualTo(new ToolExecutionContext("conversation-context", "weather", "call-context")); // 断言保护链收到可用于限流和关联展示的完整标识。
+    } // 结束工具执行上下文传递测试。
 
     @Test // 标记验证取消等待工具时不会产生迟到工具事件的测试方法。
     void cancellationDuringToolWaitEmitsOnlyCancellationProtocol() throws Exception { // 验证停止请求优先于工具迟到结果和后续模型调用。
