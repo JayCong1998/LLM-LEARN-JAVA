@@ -2,7 +2,7 @@
 package com.jaycong.dodo.memory;
 
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -15,33 +15,20 @@ import java.util.List;
 // 使用已有 ai_session 表持久化成功问答，使会话记忆在应用重启后仍可恢复。
 public class MySqlConversationMemory implements ConversationMemory {
 
-    // 查询指定会话最新五条记录；倒序读取可让数据库利用会话和时间索引快速截取窗口。
-    private static final String SELECT_RECENT_TURNS = """
-            SELECT question, answer
-            FROM ai_session
-            WHERE session_id = ?
-            ORDER BY create_time DESC, id DESC
-            LIMIT 5
-            """;
-    // 仅写入当前阶段需要的会话编号、用户问题和最终回答，其他已有列留给后续阶段扩展。
-    private static final String INSERT_TURN = """
-            INSERT INTO ai_session (session_id, question, answer)
-            VALUES (?, ?, ?)
-            """;
-    // 按会话编号删除全部历史，使清空语义与内存窗口实现一致。
-    private static final String DELETE_TURNS = "DELETE FROM ai_session WHERE session_id = ?";
-    // 保存 Spring JDBC 模板，以复用连接池、参数绑定和异常转换能力。
-    private final JdbcTemplate jdbcTemplate;
+    // 固定追加到查询尾部的窗口限制，不接受外部输入，因此不会形成 SQL 注入入口。
+    private static final String RECENT_TURN_LIMIT = "LIMIT 5";
+    // 保存 ai_session Mapper，以复用 MyBatis-Plus 的实体映射和通用 CRUD 能力。
+    private final AiSessionMapper aiSessionMapper;
 
-    // 通过构造器注入 JDBC 模板，使适配器可在隔离 H2 数据库中进行真实 SQL 测试。
-    public MySqlConversationMemory(JdbcTemplate jdbcTemplate) {
-        // 拒绝缺少数据库执行器的错误装配，避免运行时空指针隐藏配置问题。
-        if (jdbcTemplate == null) {
-            // 使用参数异常明确指出持久化适配器缺少必要依赖。
-            throw new IllegalArgumentException("JdbcTemplate 不能为空");
+    // 通过构造器注入 Mapper，使适配器只依赖声明式的表访问边界。
+    public MySqlConversationMemory(AiSessionMapper aiSessionMapper) {
+        // 拒绝缺少数据访问端口的错误装配，避免运行时空指针隐藏配置问题。
+        if (aiSessionMapper == null) {
+            // 使用参数异常明确指出持久化适配器缺少必要 Mapper。
+            throw new IllegalArgumentException("AiSessionMapper 不能为空");
         }
-        // 保存已校验的 JDBC 模板供三个端口方法执行 SQL。
-        this.jdbcTemplate = jdbcTemplate;
+        // 保存已校验的 Mapper 供三个端口方法执行持久化操作。
+        this.aiSessionMapper = aiSessionMapper;
     }
 
     @Override
@@ -50,15 +37,23 @@ public class MySqlConversationMemory implements ConversationMemory {
         // 在访问数据库前统一拒绝无法作为稳定键的会话编号。
         validateConversationId(conversationId);
         // 数据库按最新到最旧返回最多五条，避免把完整历史全部加载到 JVM。
-        List<ConversationTurn> newestFirstTurns = jdbcTemplate.query(
-                // 使用参数化 SQL 防止会话编号被拼接进查询文本。
-                SELECT_RECENT_TURNS,
-                // 将每行的用户问题和助手回答还原为领域中的完整对话轮次。
-                (resultSet, rowNumber) -> new ConversationTurn(resultSet.getString("question"), resultSet.getString("answer")),
-                // 绑定当前会话编号作为唯一查询条件。
-                conversationId);
-        // 复制可变查询结果，防止反转操作修改 JDBC 框架返回的列表实现。
-        List<ConversationTurn> chronologicalTurns = new ArrayList<>(newestFirstTurns);
+        List<AiSessionEntity> newestFirstSessions = aiSessionMapper.selectList(
+                // 使用 Lambda 字段引用构造会话条件和稳定排序，避免手写列名字符串。
+                Wrappers.lambdaQuery(AiSessionEntity.class)
+                        // 仅查询当前会话的历史记录。
+                        .eq(AiSessionEntity::getSessionId, conversationId)
+                        // 首先按创建时间倒序取得最新记录。
+                        .orderByDesc(AiSessionEntity::getCreateTime)
+                        // 创建时间相同时按自增主键倒序保持确定性。
+                        .orderByDesc(AiSessionEntity::getId)
+                        // 追加固定窗口限制，让数据库只返回最近五条。
+                        .last(RECENT_TURN_LIMIT));
+        // 将完整表实体投影为 Agent 上下文真正需要的用户问题和助手回答。
+        List<ConversationTurn> chronologicalTurns = new ArrayList<>(newestFirstSessions.stream()
+                // 每行记录恢复为不可分割的一轮领域问答。
+                .map(session -> new ConversationTurn(session.getQuestion(), session.getAnswer()))
+                // 先收集为可变列表，供后续反转操作恢复时间顺序。
+                .toList());
         // 将最新优先恢复为最旧优先，保持提示词中的对话时间线自然连续。
         Collections.reverse(chronologicalTurns);
         // 返回不可变快照，避免调用方意外修改本次读取的历史内容。
@@ -75,8 +70,16 @@ public class MySqlConversationMemory implements ConversationMemory {
             // 以参数异常向调用方说明缺少必须保存的会话轮次。
             throw new IllegalArgumentException("会话轮次不能为空");
         }
-        // 使用预编译参数写入完整问答，避免字符串拼接和 SQL 注入风险。
-        jdbcTemplate.update(INSERT_TURN, conversationId, turn.userContent(), turn.assistantContent());
+        // 创建本阶段所需的表实体，其他字段保持空值并交由数据库默认值或后续阶段填充。
+        AiSessionEntity session = new AiSessionEntity();
+        // 设置当前会话的稳定编号。
+        session.setSessionId(conversationId);
+        // 设置本轮用户问题。
+        session.setQuestion(turn.userContent());
+        // 设置本轮最终助手回答。
+        session.setAnswer(turn.assistantContent());
+        // 通过 MyBatis-Plus 插入实体，参数绑定和主键回填由框架负责。
+        aiSessionMapper.insert(session);
     }
 
     @Override
@@ -85,7 +88,11 @@ public class MySqlConversationMemory implements ConversationMemory {
         // 在执行删除前统一拒绝无效会话编号。
         validateConversationId(conversationId);
         // 非零受影响行数表示调用时确实存在并清除了至少一轮历史。
-        return jdbcTemplate.update(DELETE_TURNS, conversationId) > 0;
+        return aiSessionMapper.delete(
+                // 使用 Lambda 条件精确删除当前会话的全部记录。
+                Wrappers.lambdaQuery(AiSessionEntity.class)
+                        // 将删除范围限制为请求提供的会话编号。
+                        .eq(AiSessionEntity::getSessionId, conversationId)) > 0;
     }
 
     // 集中维护三个端口方法共享的会话编号约束，保持与内存实现完全一致。

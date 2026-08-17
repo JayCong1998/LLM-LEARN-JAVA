@@ -22,12 +22,14 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
-        <!-- 引入 JDBC 基础设施，使持久化记忆适配器可以使用 JdbcTemplate 执行数据库操作。 -->
+        <!-- 引入 MyBatis-Plus 基础设施，使持久化记忆适配器可以通过 Mapper 执行数据库操作。 -->
         <dependency>
-            <!-- 指定 JDBC Starter 的组织坐标。 -->
-            <groupId>org.springframework.boot</groupId>
-            <!-- 启用数据源自动配置、连接池与 JdbcTemplate。 -->
-            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <!-- 指定 MyBatis-Plus 的组织坐标。 -->
+            <groupId>com.baomidou</groupId>
+            <!-- 使用适配 Spring Boot 3 的 MyBatis-Plus Starter，并由它引入 JDBC 基础设施。 -->
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <!-- 固定经官方 Spring Boot 3 Starter 文档验证的 MyBatis-Plus 版本。 -->
+            <version>3.5.17</version>
         </dependency>
         <!-- 在运行应用时提供 MySQL 协议与驱动实现。 -->
         <dependency>
