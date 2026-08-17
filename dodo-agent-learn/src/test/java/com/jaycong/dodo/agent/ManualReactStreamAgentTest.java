@@ -15,15 +15,14 @@ import reactor.core.publisher.Flux;
 class ManualReactStreamAgentTest {
 
     @Test
-    void emitsEveryFinalAnswerFragmentAndPersistsOnlyTheirCompleteText() {
+    void usesTheReactDecisionAsTheFinalAnswerWithoutASecondModelStream() {
         ConversationMemory memory = new InMemoryConversationMemory();
         ReactModelPort model = (messages, toolsEnabled) -> new AssistantMessage("同步探测完成");
-        FinalAnswerStreamPort finalAnswers = messages -> Flux.just("第", "二", "段");
-        ManualReactStreamAgent agent = new ManualReactStreamAgent(model, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry(), memory, run -> memory.append(run.conversationId(), new com.jaycong.dodo.memory.ConversationTurn(run.question(), run.answer())), finalAnswers);
+        ManualReactStreamAgent agent = new ManualReactStreamAgent(model, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry(), memory, run -> memory.append(run.conversationId(), new com.jaycong.dodo.memory.ConversationTurn(run.question(), run.answer())));
 
         List<AgentStreamEvent> events = agent.stream("conversation-stream", "问题").collectList().block(Duration.ofSeconds(3));
 
-        assertThat(events).containsExactly(AgentStreamEvent.text("第"), AgentStreamEvent.text("二"), AgentStreamEvent.text("段"), AgentStreamEvent.complete());
-        assertThat(memory.get("conversation-stream")).singleElement().satisfies(turn -> assertThat(turn.assistantContent()).isEqualTo("第二段"));
+        assertThat(events).containsExactly(AgentStreamEvent.text("同步探测完成"), AgentStreamEvent.complete());
+        assertThat(memory.get("conversation-stream")).singleElement().satisfies(turn -> assertThat(turn.assistantContent()).isEqualTo("同步探测完成"));
     }
 }
