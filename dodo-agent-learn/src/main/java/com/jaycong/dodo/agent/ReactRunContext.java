@@ -4,9 +4,11 @@ import org.springframework.ai.chat.messages.Message;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 保存一次 Agent 请求从创建到终止的全部可变状态。
@@ -17,6 +19,8 @@ public class ReactRunContext { // 定义单次运行的消息历史、循环防�
     private final List<Message> messages; // 按实际发生顺序保存发送给模型的全部消息。
     private final int maxRounds; // 保存允许模型带工具决策的最大轮数。
     private final Set<String> executedToolSignatures = new HashSet<>(); // 保存已经真实执行过的工具名称与参数签名。
+    private final Set<String> executedToolNames = new LinkedHashSet<>(); // 按首次真实执行顺序保存安全的工具名称快照。
+    private final AtomicLong firstResponseTimeMillis = new AtomicLong(-1L); // 保存首次可观察事件耗时，负值表示尚未产生。
     private final AtomicBoolean cancelled = new AtomicBoolean(); // 跨停止线程和模型工作线程共享取消状态。
     private final AtomicBoolean finished = new AtomicBoolean(); // 保护错误、完成和取消路径只发送一次终止序列。
     private int round; // 记录已经成功开始的工具决策轮数，受同步方法保护。
@@ -52,8 +56,29 @@ public class ReactRunContext { // 定义单次运行的消息历史、循环防�
     public synchronized boolean markToolExecution(String toolName, String arguments) { // 登记工具签名并报告它是否首次出现。
         String normalizedArguments = arguments == null ? "" : arguments.trim(); // 只清理首尾空格，保留模型原始 JSON 的其他差异。
         String signature = toolName + "\n" + normalizedArguments; // 用不可与普通名称混淆的换行符连接名称和参数。
-        return executedToolSignatures.add(signature); // Set 在首次加入时返回 true，重复签名返回 false。
+        boolean firstExecution = executedToolSignatures.add(signature); // Set 在首次加入时返回 true，重复签名返回 false。
+        if (firstExecution) { // 只有真正进入执行路径的首次签名才应记录安全工具名称。
+            executedToolNames.add(toolName); // 按调用首次发生的顺序保存名称，不保存参数或 Observation。
+        } // 结束首次执行工具名称记录分支。
+        return firstExecution; // 将重复保护结果返回给 Agent 决定是否实际调用注册表。
     } // 释放上下文锁并结束工具执行登记方法。
+
+    public List<String> executedToolNames() { // 返回本次运行实际执行工具名称的不可变有序快照。
+        synchronized (this) { // 与工具登记共用上下文锁，保证读取到一致的顺序集合。
+            return List.copyOf(executedToolNames); // 冻结名称列表，防止持久化调用方反向修改运行上下文。
+        } // 释放上下文锁并结束工具名称快照方法。
+    } // 结束实际工具名称读取方法。
+
+    public void recordFirstResponseTimeMillisIfAbsent(long elapsedMillis) { // 首次可观察事件到达时冻结一次性能指标。
+        if (elapsedMillis < 0L) { // 单调时钟差值不应为负数，负值说明调用方违反计时契约。
+            throw new IllegalArgumentException("首响应耗时不能为负数"); // 以稳定异常阻止非法指标继续传播。
+        } // 结束首响应耗时校验分支。
+        firstResponseTimeMillis.compareAndSet(-1L, elapsedMillis); // 只让第一个工具开始或最终文本获得首响应定义权。
+    } // 结束首响应耗时冻结方法。
+
+    public long firstResponseTimeMillis() { // 获取已经冻结的首次可观察事件耗时。
+        return firstResponseTimeMillis.get(); // 返回原子快照；负值仍表示尚未产生可观察事件。
+    } // 结束首响应耗时读取方法。
 
     public boolean markCancelled() { // 尝试将本次运行从未取消状态切换为已取消。
         return cancelled.compareAndSet(false, true); // 只让第一个取消来源获得成功结果并触发后续通知。

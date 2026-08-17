@@ -2,6 +2,8 @@ package com.jaycong.dodo.agent; // 将手写 ReAct 编排器放在 Agent 核心�
 
 import com.jaycong.dodo.memory.ConversationMemory;
 import com.jaycong.dodo.memory.ConversationTurn;
+import com.jaycong.dodo.trace.SuccessfulAgentRun;
+import com.jaycong.dodo.trace.SuccessfulAgentRunPersistence;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -10,6 +12,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
@@ -32,16 +35,24 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     private final AgentToolRegistry tools; // 保存工具声明和实际执行共用的注册表。
     private final InMemoryTaskRegistry tasks; // 保存会话互斥、停止入口和工作订阅句柄。
     private final ConversationMemory memory; // 保存按会话读取跨请求历史的抽象记忆端口。
+    private final SuccessfulAgentRunPersistence successfulRuns; // 保存只接收完整成功运行的轨迹持久化端口。
 
+    public ManualReactAgent(ReactModelPort model, AgentToolRegistry tools, InMemoryTaskRegistry tasks, ConversationMemory memory) { // 为既有独立教学测试保留四参数构造入口。
+        this(model, tools, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 兼容入口只桥接旧测试的问答断言，生产装配不会使用它。
+    } // 结束兼容测试构造方法。
+
+    @Autowired
     public ManualReactAgent( // 通过构造器显式声明 ReAct 循环的四个边界依赖。
             ReactModelPort model, // 接收可替换的模型决策端口。
             AgentToolRegistry tools, // 接收名称稳定的本地工具目录。
             InMemoryTaskRegistry tasks, // 接收进程内任务生命周期注册表。
-            ConversationMemory memory) { // 接收可替换的跨请求会话记忆端口并结束参数列表。
+            ConversationMemory memory, // 接收只读取跨请求问答历史的端口。
+            SuccessfulAgentRunPersistence successfulRuns) { // 接收只持久化完整成功运行的端口并结束参数列表。
         this.model = model; // 保存模型端口供每轮同步决策使用。
         this.tools = tools; // 保存工具注册表供 Action 执行和 Observation 生成使用。
         this.tasks = tasks; // 保存任务注册表供并发保护和资源释放使用。
         this.memory = memory; // 保存记忆端口供每次运行开始时读取一次历史快照。
+        this.successfulRuns = successfulRuns; // 保存轨迹端口供最终答案成功后一次性提交完整记录。
     } // 结束手写 Agent 构造方法。
 
     /**
@@ -72,7 +83,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
              * ChatClient.call 是阻塞操作，因此整个 while 循环必须离开 WebFlux 事件线程。
              * 一个运行只使用一个 boundedElastic 工作者，工具调用自然保持模型给出的顺序。
              */
-            var worker = Mono.fromRunnable(() -> runLoop(conversationId, message, context, output)) // 把历史读取和同步 ReAct 循环包装成可取消工作单元。
+            var worker = Mono.fromRunnable(() -> runLoop(conversationId, message, context, output, System.nanoTime())) // 在线程开始前记录单调时钟起点并包装阻塞循环。
                     .subscribeOn(Schedulers.boundedElastic()) // 将模型阻塞调用调度到有界弹性线程池。
                     .subscribe(); // 启动后台循环并取得停止接口可以 dispose 的订阅句柄。
             tasks.attach(conversationId, worker); // 把工作订阅绑定到已注册任务，处理注册后立即取消的竞争。
@@ -95,7 +106,8 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             String conversationId, // 接收任务注册与清理使用的会话编号。
             String currentUserMessage, // 接收本次 HTTP 请求的用户问题，供历史之后追加。
             ReactRunContext context, // 接收本次运行独享的消息和状态上下文。
-            Sinks.Many<AgentStreamEvent> output) { // 接收向 SSE 下游写入事件的单订阅 Sink。
+            Sinks.Many<AgentStreamEvent> output, // 接收向 SSE 下游写入事件的单订阅 Sink。
+            long startedAtNanos) { // 接收本次 boundedElastic 工作者的单调计时起点。
         try { // 捕获模型边界的意外异常并保证任务能够关闭。
             initializeMessages(conversationId, currentUserMessage, context); // 在阻塞工作线程读取快照并按角色顺序构造初始上下文。
             if (context.isCancelled()) { // 历史读取期间客户端可能已经主动停止当前任务。
@@ -108,10 +120,10 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 } // 结束模型返回后的取消保护分支。
                 context.addMessage(assistant); // 把包含文本或 ToolCall 的原始助手消息加入历史。
                 if (!assistant.hasToolCalls()) { // 没有 Action 表示模型认为已经可以给出最终答案。
-                    finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText()); // 保存本轮问答后输出完整文本并执行唯一正常收尾。
+                    finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText(), startedAtNanos); // 持久化完整轨迹后输出最终文本并执行唯一正常收尾。
                     return; // 终止循环，避免最终答案之后再次请求模型。
                 } // 结束最终答案判断分支。
-                executeToolCalls(context, output, assistant.getToolCalls()); // 串行执行本轮全部 Action 并回填聚合 Observation。
+                executeToolCalls(context, output, assistant.getToolCalls(), startedAtNanos); // 串行执行本轮全部 Action 并回填聚合 Observation。
             } // 结束允许工具的模型决策循环。
             if (!context.isCancelled()) { // 正常路径不应静默耗尽轮次，因此先排除主动取消。
                 context.addMessage(new UserMessage("工具调用已达到上限，请基于已有观察立即总结并给出最终答案，不要再调用工具。")); // 向模型明确追加只总结已有信息的收尾指令。
@@ -124,7 +136,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     finishWithError(conversationId, context, output, "模型在强制收尾阶段仍请求工具"); // 使用稳定错误终止而不执行第五轮工具。
                     return; // 阻止异常 ToolCall 进入实际工具执行路径。
                 } // 结束强制收尾工具调用保护分支。
-                finishSuccessfully(conversationId, currentUserMessage, context, output, finalAssistant.getText()); // 保存本轮问答后输出基于已有 Observation 的最终答案。
+                finishSuccessfully(conversationId, currentUserMessage, context, output, finalAssistant.getText(), startedAtNanos); // 持久化完整轨迹后输出基于已有 Observation 的最终答案。
             } // 结束最大轮次强制收尾分支。
         } catch (Exception error) { // 捕获模型适配器或循环代码抛出的不可恢复异常。
             finishWithError(conversationId, context, output, errorMessage(error)); // 转换为稳定错误和完成事件，避免 SSE 悬挂。
@@ -151,14 +163,17 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     private void executeToolCalls( // 定义一轮内按顺序执行全部工具调用并追加统一响应消息的过程。
             ReactRunContext context, // 接收需要登记消息历史的本轮上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收工具开始和结束事件的输出通道。
-            List<AssistantMessage.ToolCall> toolCalls) { // 接收模型给出的有序工具调用列表。
+            List<AssistantMessage.ToolCall> toolCalls, // 接收模型给出的有序工具调用列表。
+            long startedAtNanos) { // 接收本次运行的单调计时起点。
         List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>(); // 创建与调用顺序一致的 Observation 响应列表。
         for (AssistantMessage.ToolCall toolCall : toolCalls) { // 串行遍历工具调用，避免共享资源并发和响应乱序。
-            output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
             String observation; // 声明本次调用最终需要展示并回填模型的 Observation。
             if (context.markToolExecution(toolCall.name(), toolCall.arguments())) { // 只有标准化签名第一次出现时才允许真实执行。
+                context.recordFirstResponseTimeMillisIfAbsent(elapsedMillis(startedAtNanos)); // 在首个真实工具 Action 对外可见前冻结首响应耗时。
+                output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
                 observation = tools.execute(toolCall.name(), toolCall.arguments()); // 经过统一错误边界执行本地工具并取得 Observation。
             } else { // 相同工具名和清理首尾空格后的参数已经在本次运行中执行过。
+                output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 保持重复调用原有可观察 SSE 协议。
                 observation = "工具调用已跳过：检测到重复调用"; // 生成稳定防循环 Observation，避免重复副作用。
             } // 结束工具签名首次执行判断分支。
             output.tryEmitNext(AgentStreamEvent.toolEnd(toolCall.name(), toolCall.id(), observation)); // 在执行后输出可关联的工具结束事件。
@@ -172,25 +187,28 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             String currentUserMessage, // 接收需要与最终答案配对保存的本次用户问题。
             ReactRunContext context, // 接收保护单次终止的运行上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收最终文本和完成事件的输出通道。
-            String answer) { // 接收模型生成的完整最终回答。
+            String answer, // 接收模型生成的完整最终回答。
+            long startedAtNanos) { // 接收本次运行的单调计时起点。
         if (answer == null || answer.isBlank()) { // 最终文本为空时前端和用户都无法得到有效结果。
             finishWithError(conversationId, context, output, "模型未返回最终答案"); // 将无效模型结果转换成稳定错误终止协议。
             return; // 停止正常完成流程，避免继续发送空 text 事件。
         } // 结束空最终答案保护分支。
         if (context.tryFinish()) { // 只有第一个终止路径可以输出并关闭协议流。
-            tasks.complete(conversationId); // 先释放会话占用，使任务状态与即将结束的流一致。
             try { // 在展示最终答案前提交完整问答，保证客户端看到的成功结果已经进入跨请求记忆。
-                memory.append(conversationId, new ConversationTurn(currentUserMessage, answer)); // 只保存用户问题和最终答案，不保存本次工具调用轨迹。
+                context.recordFirstResponseTimeMillisIfAbsent(elapsedMillis(startedAtNanos)); // 直接回答时在最终 text 可见前冻结首响应耗时。
+                successfulRuns.persist(new SuccessfulAgentRun(conversationId, currentUserMessage, answer, context.executedToolNames(), context.firstResponseTimeMillis(), elapsedMillis(startedAtNanos), "manual-react")); // 一次性写入问答与安全轨迹，禁止分步形成半成品记录。
             } catch (Exception error) { // 捕获记忆实现的保存异常并转换为稳定终止协议。
                 /*
                  * 当前分支已经通过 tryFinish 取得唯一终止权，不能再调用 finishWithError。
                  * finishWithError 内部会执行第二次 tryFinish 并失败，最终导致客户端收不到任何错误和完成事件。
                  */
-                output.tryEmitNext(AgentStreamEvent.error("会话记忆保存失败：" + errorMessage(error))); // 直接发送可诊断的保存失败事件，并明确区分模型错误。
+                tasks.complete(conversationId); // 轨迹写入失败后仍释放会话占用，允许用户随后重试。
+                output.tryEmitNext(AgentStreamEvent.error("运行轨迹保存失败：" + errorMessage(error))); // 直接发送可诊断的保存失败事件，并明确区分模型错误。
                 output.tryEmitNext(AgentStreamEvent.complete()); // 保存失败后仍发送协议完成事件供前端统一收尾。
                 output.tryEmitComplete(); // 关闭 Reactor 流并触发幂等资源清理。
                 return; // 阻止未成功保存的答案继续作为 text 事件发给客户端。
             } // 结束记忆保存异常处理分支。
+            tasks.complete(conversationId); // 完整运行已写入后释放会话占用，使任务状态与即将结束的流一致。
             output.tryEmitNext(AgentStreamEvent.text(answer)); // 阶段二使用单个文本事件发送完整最终答案。
             output.tryEmitNext(AgentStreamEvent.complete()); // 发送显式协议完成事件供前端统一收尾。
             output.tryEmitComplete(); // 关闭 Reactor 流并触发最终清理钩子。
@@ -216,4 +234,8 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
         } // 结束异常消息回退分支。
         return error.getMessage(); // 保留具体模型或循环失败说明供学习和诊断。
     } // 结束异常文本转换方法。
+
+    private long elapsedMillis(long startedAtNanos) { // 将单调纳秒起点转换为当前经过的非负毫秒数。
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos); // 使用单调时钟差值避免系统时间调整污染性能指标。
+    } // 结束单调耗时计算方法。
 } // 结束手写 ReAct Agent 定义。

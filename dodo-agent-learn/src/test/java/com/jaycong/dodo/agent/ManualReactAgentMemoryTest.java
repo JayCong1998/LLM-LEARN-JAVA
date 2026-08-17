@@ -132,7 +132,7 @@ class ManualReactAgentMemoryTest {
         // 订阅会在正常终止阶段遭遇保存失败的请求。
         StepVerifier.create(agent.stream("conversation-save-error", "当前问题"))
                 // 断言第一条终止事件明确说明记忆保存失败。
-                .expectNext(AgentStreamEvent.error("会话记忆保存失败：memory write unavailable"))
+                .expectNext(AgentStreamEvent.error("运行轨迹保存失败：memory write unavailable"))
                 // 断言错误后发送统一完成事件，期间不得出现 text。
                 .expectNext(AgentStreamEvent.complete())
                 // 断言事件流正常关闭而不是抛出 Reactor 异常。
