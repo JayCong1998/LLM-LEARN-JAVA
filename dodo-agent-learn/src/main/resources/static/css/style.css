@@ -65,8 +65,106 @@ h1 {
 
 .input-panel,
 .tool-panel,
-.output-panel {
+.output-panel,
+.memory-panel {
     margin-top: 24px;
+}
+
+/* 记忆标题栏让轮次数量和操作按钮保持同一视觉层级。 */
+.memory-header {
+    /* 使用弹性布局让标题和操作按钮在宽屏时自然分居两侧。 */
+    display: flex;
+    /* 在可用宽度内分开标题与按钮组。 */
+    justify-content: space-between;
+    /* 让不同字号的元素在垂直方向保持居中。 */
+    align-items: center;
+    /* 窄屏换行时仍保留按钮与标题之间的间距。 */
+    gap: 12px;
+}
+
+/* 记忆操作按钮采用紧凑分组，避免挤占输入控制区。 */
+.memory-actions {
+    /* 让刷新和清空按钮横向排列。 */
+    display: flex;
+    /* 在两个操作之间提供固定间距。 */
+    gap: 8px;
+}
+
+/* 清空属于可恢复但需要谨慎确认的操作，因此使用错误语义色。 */
+button.danger {
+    /* 使用白底保持次级按钮层级。 */
+    background: white;
+    /* 使用红色文字提示这是删除已保存历史的操作。 */
+    color: #b91c1c;
+    /* 使用红色边框强化操作语义。 */
+    border-color: #fecaca;
+}
+
+/* 记忆状态展示加载、完成或失败的当前操作结果。 */
+.memory-status {
+    /* 与标题保持紧凑但可辨认的间距。 */
+    margin: 0 0 10px;
+    /* 使用较小辅助字号避免同历史正文竞争注意力。 */
+    font-size: 13px;
+    /* 默认采用中性文本颜色。 */
+    color: #64748b;
+}
+
+/* 读取中使用蓝色说明页面正在等待服务端快照。 */
+.memory-status[data-state="loading"] {
+    /* 蓝色与主页面运行中状态保持一致。 */
+    color: #1d4ed8;
+}
+
+/* 加载完成使用绿色确认当前面板已经反映服务器快照。 */
+.memory-status[data-state="complete"] {
+    /* 绿色表示查询完成而非 Agent 的内部推理状态。 */
+    color: #15803d;
+}
+
+/* 请求失败使用红色帮助用户区分空历史与连接故障。 */
+.memory-status[data-state="error"] {
+    /* 红色提示当前无法可靠展示会话历史。 */
+    color: #b91c1c;
+}
+
+/* 多轮历史以纵向列表保持问答时间顺序。 */
+.memory-turns {
+    /* 使用网格让每轮卡片按追加顺序垂直排列。 */
+    display: grid;
+    /* 在相邻轮次之间保留阅读间距。 */
+    gap: 10px;
+}
+
+/* 单轮历史卡片保持简洁，重点呈现用户问题和最终回答。 */
+.memory-turn {
+    /* 使用浅灰边框区分相邻完整问答轮次。 */
+    border: 1px solid #d8e0ea;
+    /* 使用圆角延续控制台整体视觉语言。 */
+    border-radius: 10px;
+    /* 为角色标签与正文提供舒适内边距。 */
+    padding: 12px;
+    /* 使用略深背景与页面白底形成层次。 */
+    background: #fbfcfe;
+}
+
+/* 历史正文保留换行并允许长内容自动换行。 */
+.memory-turn p,
+.memory-empty {
+    /* 清除默认段落外边距以获得稳定卡片节奏。 */
+    margin: 4px 0 10px;
+    /* 保留模型回答中的换行。 */
+    white-space: pre-wrap;
+    /* 防止超长无空格文本撑破面板。 */
+    overflow-wrap: anywhere;
+}
+
+/* 空历史使用柔和颜色，不与失败状态混淆。 */
+.memory-empty {
+    /* 移除末尾外边距保持空状态整体紧凑。 */
+    margin-bottom: 0;
+    /* 使用中性颜色表达当前没有成功保存的问答。 */
+    color: #718096;
 }
 
 /* 使用网格让多个工具调用按照事件顺序垂直排列。 */
@@ -240,4 +338,6 @@ footer {
     body { padding: 16px; }
     .console { padding: 22px; }
     .session-card { align-items: flex-start; flex-direction: column; gap: 5px; }
+    /* 小屏幕将标题与操作按钮改为纵向排列，避免按钮压缩标题。 */
+    .memory-header { align-items: flex-start; flex-direction: column; }
 }

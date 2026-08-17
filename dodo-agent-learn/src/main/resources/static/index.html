@@ -23,6 +23,29 @@
         <code id="conversation-id"></code>
     </section>
 
+    <!-- 记忆面板只查看已经成功保存的跨请求问答，不混入本轮尚未结束的工具轨迹。 -->
+    <section id="memory-panel" class="memory-panel" aria-label="会话记忆">
+        <!-- 标题栏同时展示固定五轮窗口中的当前已加载轮次数。 -->
+        <div class="memory-header">
+            <!-- 标题明确这里展示的是跨 HTTP 请求保留的会话数据。 -->
+            <h2>会话记忆 <span id="memory-turn-count">尚未加载</span></h2>
+            <!-- 操作按钮只影响记忆接口，不能启动或停止当前 Agent。 -->
+            <div class="memory-actions">
+                <!-- 刷新按钮重新读取当前 conversationId 的已完成历史。 -->
+                <button id="refresh-memory" class="secondary" type="button">刷新记忆</button>
+                <!-- 清空按钮显式删除当前 conversationId 已保存的历史窗口。 -->
+                <button id="clear-memory" class="secondary danger" type="button">清空记忆</button>
+            <!-- 结束记忆操作按钮容器。 -->
+            </div>
+        <!-- 结束记忆标题与操作栏。 -->
+        </div>
+        <!-- 初始状态避免把“尚未请求”误表达为“没有历史”。 -->
+        <p id="memory-status" class="memory-status" data-state="ready">尚未加载记忆</p>
+        <!-- 脚本将以 textContent 创建历史条目，禁止服务端历史作为 HTML 注入。 -->
+        <div id="memory-turns" class="memory-turns" aria-live="polite"></div>
+    <!-- 结束跨请求会话记忆面板。 -->
+    </section>
+
     <section class="input-panel">
         <label for="message">发送给模型的消息</label>
         <textarea id="message" rows="5" placeholder="例如：用一句话解释什么是 Agent" autofocus></textarea>
