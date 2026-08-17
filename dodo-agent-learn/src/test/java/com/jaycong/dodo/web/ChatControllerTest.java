@@ -6,6 +6,7 @@ import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import com.jaycong.dodo.tool.WeatherTool;
+import com.jaycong.dodo.trace.SuccessfulAgentRunPersistence;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.support.ToolCallbacks;
@@ -91,6 +92,12 @@ class ChatControllerTest {
         @Bean
         AgentToolRegistry agentToolRegistry() { // 提供同时用于模型声明和真实执行的测试工具注册表。
             return new AgentToolRegistry(Arrays.asList(ToolCallbacks.from(new WeatherTool()))); // 注册确定性天气工具并返回目录。
+        }
+
+        @Bean
+        SuccessfulAgentRunPersistence successfulAgentRunPersistence() { // 为 Web 切片提供不访问数据库的完整运行持久化端口。
+            return run -> { // 切片只验证 SSE 协议，因此成功写入可安全表现为无副作用。
+            }; // 结束无副作用轨迹持久化回调。
         }
     }
 }
