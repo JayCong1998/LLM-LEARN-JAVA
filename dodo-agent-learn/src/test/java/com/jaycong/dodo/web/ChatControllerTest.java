@@ -5,6 +5,7 @@ import com.jaycong.dodo.agent.ReactModelPort;
 import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
+import com.jaycong.dodo.tool.TimedToolExecutor;
 import com.jaycong.dodo.tool.WeatherTool;
 import com.jaycong.dodo.trace.SuccessfulAgentRunPersistence;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @WebFluxTest(ChatController.class)
-@Import({ManualReactAgent.class, InMemoryTaskRegistry.class, InMemoryConversationMemory.class, ChatControllerTest.FakeModelConfiguration.class})
+@Import({ManualReactAgent.class, TimedToolExecutor.class, InMemoryTaskRegistry.class, InMemoryConversationMemory.class, ChatControllerTest.FakeModelConfiguration.class})
 class ChatControllerTest {
 
     @Autowired

@@ -2,6 +2,7 @@ package com.jaycong.dodo.tool; // 将限时工具执行策略放在工具包中�
 
 import jakarta.annotation.PreDestroy; // 引入 Spring Bean 销毁时释放执行器资源的生命周期标记。
 import org.springframework.stereotype.Component; // 引入让 Spring 自动装配生产执行器的组件标记。
+import org.springframework.beans.factory.annotation.Autowired; // 引入显式指定生产构造器的依赖注入标记。
 
 import java.time.Duration; // 引入表达固定工具等待上限的时间类型。
 import java.util.concurrent.ExecutionException; // 引入包装内部工具任务异常的 Future 异常类型。
@@ -24,6 +25,7 @@ public class TimedToolExecutor implements ToolExecutionPort, AutoCloseable { // 
     private final Duration timeout; // 保存当前实例等待每次工具任务结果的不可变时限。
     private final ExecutorService executor; // 保存为每次工具调用创建独立虚拟线程的受管执行器。
 
+    @Autowired
     public TimedToolExecutor(AgentToolRegistry registry) { // 接收 Spring 注入的注册表并创建生产默认超时实例。
         this(registry, DEFAULT_TIMEOUT); // 复用可测试构造器，确保生产和测试共享同一资源策略。
     } // 结束生产构造方法。

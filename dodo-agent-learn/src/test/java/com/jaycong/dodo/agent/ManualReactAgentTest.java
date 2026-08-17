@@ -3,6 +3,7 @@ package com.jaycong.dodo.agent; // 将手写 ReAct 行为测试放在核心 Agen
 import com.jaycong.dodo.memory.InMemoryConversationMemory;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
+import com.jaycong.dodo.tool.ToolExecutionPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -171,9 +172,63 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         assertThat(tasks.hasRunningTask("conversation-blocking")).isFalse(); // 断言取消后会话任务已被释放。
     } // 结束并发保护和主动取消测试。
 
+    @Test // 标记验证超时 Observation 仍会回填模型并完成运行的测试方法。
+    void feedsTimeoutObservationBackToModelAndContinuesReactLoop() { // 验证超时是可恢复工具结果，而不是整个 Agent 的终止错误。
+        AssistantMessage toolDecision = decision(call("call-timeout", "weather", "{}")); // 创建模型第一轮请求天气工具的 Action。
+        ScriptedModel model = new ScriptedModel(toolDecision, new AssistantMessage("天气工具超时，我先给出替代说明。")); // 配置模型收到超时 Observation 后仍给出最终答案。
+        ToolExecutionPort timedOutTool = (toolName, arguments) -> "工具执行超时：" + toolName; // 创建模拟限时执行器返回稳定超时 Observation 的端口。
+        ManualReactAgent agent = agent(model, timedOutTool, new InMemoryTaskRegistry()); // 组装使用专用限时端口的 ReAct Agent。
+
+        StepVerifier.create(agent.stream("conversation-timeout", "查询天气")) // 订阅包含一次超时工具调用的真实 Agent 流。
+                .expectNext(AgentStreamEvent.toolStart("weather", "call-timeout", "{}")) // 断言真实工具调用前仍按原协议发送开始事件。
+                .expectNext(AgentStreamEvent.toolEnd("weather", "call-timeout", "工具执行超时：weather")) // 断言超时作为可观察结束 Observation 发给客户端。
+                .expectNext(AgentStreamEvent.text("天气工具超时，我先给出替代说明。")) // 断言模型可以基于超时 Observation 继续完成回答。
+                .expectNext(AgentStreamEvent.complete()) // 断言可恢复超时路径仍使用正常完成协议。
+                .verifyComplete(); // 断言整个事件流正常关闭。
+        ToolResponseMessage responses = (ToolResponseMessage) model.messageSnapshots.get(1).get(3); // 取得第二轮模型调用前聚合的工具响应消息。
+        assertThat(responses.getResponses().getFirst().responseData()).isEqualTo("工具执行超时：weather"); // 断言 SSE 展示与模型上下文回填使用同一超时文本。
+    } // 结束超时 Observation 回填测试。
+
+    @Test // 标记验证取消等待工具时不会产生迟到工具事件的测试方法。
+    void cancellationDuringToolWaitEmitsOnlyCancellationProtocol() throws Exception { // 验证停止请求优先于工具迟到结果和后续模型调用。
+        AssistantMessage toolDecision = decision(call("call-blocking", "weather", "{}")); // 创建会进入阻塞工具执行的第一轮 Action。
+        ScriptedModel model = new ScriptedModel(toolDecision, new AssistantMessage("不应回答")); // 配置理论上只能在取消失败后才会使用的最终回答。
+        InMemoryTaskRegistry tasks = new InMemoryTaskRegistry(); // 创建供测试主动取消正在运行任务的注册表。
+        CountDownLatch entered = new CountDownLatch(1); // 创建等待 Agent 已进入工具端口的同步信号。
+        CountDownLatch interrupted = new CountDownLatch(1); // 创建确认 Agent 外层中断已传递到端口的同步信号。
+        ToolExecutionPort blockingTool = (toolName, arguments) -> { // 创建会阻塞至被任务停止中断的测试工具端口。
+            entered.countDown(); // 标记 Agent 已开始等待本次工具执行。
+            try { // 进入可由 boundedElastic 工作订阅 dispose 中断的等待区域。
+                new CountDownLatch(1).await(); // 持续阻塞，直到停止请求打断当前工作线程。
+                return "不应返回"; // 为编译器提供理论不可达的返回值。
+            } catch (InterruptedException error) { // 接收任务取消传播到 Agent 工作者的中断。
+                interrupted.countDown(); // 通知测试线程端口已观察到中断。
+                Thread.currentThread().interrupt(); // 恢复中断标记以保持协作取消语义。
+                throw new IllegalStateException("tool interrupted", error); // 抛出异常，验证 Agent 不会把它转换成迟到 tool_end。
+            } // 结束阻塞工具端口的中断处理分支。
+        }; // 结束阻塞工具端口定义。
+        ManualReactAgent agent = agent(model, blockingTool, tasks); // 组装使用可取消端口的 Agent。
+
+        CompletableFuture<List<AgentStreamEvent>> events = agent.stream("conversation-tool-cancel", "等待工具") // 异步订阅正在等待工具的事件流。
+                .collectList() // 收集取消后应立即结束的稳定事件序列。
+                .toFuture(); // 转换为 Future，避免测试线程阻塞 Agent 工作线程。
+        assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue(); // 确认工具已经开始后再发起停止，避免取消尚未注册的任务。
+        assertThat(tasks.cancel("conversation-tool-cancel")).isTrue(); // 触发与 HTTP 停止接口相同的任务取消入口。
+        assertThat(events.get(2, TimeUnit.SECONDS)).containsExactly( // 读取仍连接客户端收到的完整取消序列。
+                AgentStreamEvent.toolStart("weather", "call-blocking", "{}"), // 断言已经开始的真实工具调用保留其既有可观察事件。
+                AgentStreamEvent.error("request cancelled"), // 断言取消随后输出既有稳定错误事件。
+                AgentStreamEvent.complete()); // 断言取消后只输出完成事件，绝不发送迟到 tool_end 或文本事件。
+        assertThat(interrupted.await(2, TimeUnit.SECONDS)).isTrue(); // 断言停止也中断了正在等待的工具端口。
+        assertThat(model.messageSnapshots).hasSize(1); // 断言取消后没有再用工具结果请求第二轮模型。
+    } // 结束等待工具取消测试。
+
     private ManualReactAgent agent(ReactModelPort model, List<ToolCallback> callbacks, InMemoryTaskRegistry tasks) { // 统一组装支持任意假模型端口的手写 Agent。
         return new ManualReactAgent(model, new AgentToolRegistry(callbacks), tasks, new InMemoryConversationMemory()); // 注入脚本模型、真实注册表、任务生命周期组件和独立空记忆。
     } // 结束测试 Agent 工厂方法。
+
+    private ManualReactAgent agent(ReactModelPort model, ToolExecutionPort toolExecutor, InMemoryTaskRegistry tasks) { // 统一组装可注入限时或阻塞端口的 ReAct Agent。
+        return new ManualReactAgent(model, toolExecutor, tasks, new InMemoryConversationMemory()); // 注入模型、测试执行端口、任务注册表和独立空记忆。
+    } // 结束测试执行端口 Agent 工厂方法。
 
     private AssistantMessage decision(AssistantMessage.ToolCall... calls) { // 创建只有工具调用而没有最终文本的助手决策。
         return AssistantMessage.builder().content("").toolCalls(List.of(calls)).build(); // 使用官方 Builder 保存有序 ToolCall 列表。

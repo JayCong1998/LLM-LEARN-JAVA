@@ -6,6 +6,7 @@ import com.jaycong.dodo.trace.SuccessfulAgentRun;
 import com.jaycong.dodo.trace.SuccessfulAgentRunPersistence;
 import com.jaycong.dodo.task.InMemoryTaskRegistry;
 import com.jaycong.dodo.tool.AgentToolRegistry;
+import com.jaycong.dodo.tool.ToolExecutionPort;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -32,24 +33,32 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
     private static final int MAX_DECISION_ROUNDS = 4; // 限制允许工具的模型决策最多四轮，防止无限循环。
     private static final String SYSTEM_PROMPT = "你是一个可靠的助手。需要时调用工具，并基于工具结果给出最终答案。"; // 固定最小系统规则并避免要求输出内部思维链。
     private final ReactModelPort model; // 保存一次生成助手决策的抽象模型端口。
-    private final AgentToolRegistry tools; // 保存工具声明和实际执行共用的注册表。
+    private final ToolExecutionPort toolExecutor; // 保存封装超时和取消传播的工具执行端口。
     private final InMemoryTaskRegistry tasks; // 保存会话互斥、停止入口和工作订阅句柄。
     private final ConversationMemory memory; // 保存按会话读取跨请求历史的抽象记忆端口。
     private final SuccessfulAgentRunPersistence successfulRuns; // 保存只接收完整成功运行的轨迹持久化端口。
 
     public ManualReactAgent(ReactModelPort model, AgentToolRegistry tools, InMemoryTaskRegistry tasks, ConversationMemory memory) { // 为既有独立教学测试保留四参数构造入口。
-        this(model, tools, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 兼容入口只桥接旧测试的问答断言，生产装配不会使用它。
+        this(model, tools::execute, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 兼容入口继续直连注册表，避免既有测试被生产超时策略干扰。
     } // 结束兼容测试构造方法。
+
+    public ManualReactAgent(ReactModelPort model, ToolExecutionPort toolExecutor, InMemoryTaskRegistry tasks, ConversationMemory memory) { // 为需要注入受控执行端口的 Agent 测试提供四参数入口。
+        this(model, toolExecutor, tasks, memory, run -> memory.append(run.conversationId(), new ConversationTurn(run.question(), run.answer()))); // 复用完整构造器并保留既有测试的问答持久化断言。
+    } // 结束测试执行端口构造方法。
+
+    public ManualReactAgent(ReactModelPort model, AgentToolRegistry tools, InMemoryTaskRegistry tasks, ConversationMemory memory, SuccessfulAgentRunPersistence successfulRuns) { // 为既有完整运行轨迹测试保留注册表形式的五参数组装入口。
+        this(model, tools::execute, tasks, memory, successfulRuns); // 将旧注册表适配为执行端口，避免测试意外引入真实三秒等待。
+    } // 结束注册表形式的完整测试构造方法。
 
     @Autowired
     public ManualReactAgent( // 通过构造器显式声明 ReAct 循环的四个边界依赖。
             ReactModelPort model, // 接收可替换的模型决策端口。
-            AgentToolRegistry tools, // 接收名称稳定的本地工具目录。
+            ToolExecutionPort toolExecutor, // 接收负责超时和取消传播的工具执行端口。
             InMemoryTaskRegistry tasks, // 接收进程内任务生命周期注册表。
             ConversationMemory memory, // 接收只读取跨请求问答历史的端口。
             SuccessfulAgentRunPersistence successfulRuns) { // 接收只持久化完整成功运行的端口并结束参数列表。
         this.model = model; // 保存模型端口供每轮同步决策使用。
-        this.tools = tools; // 保存工具注册表供 Action 执行和 Observation 生成使用。
+        this.toolExecutor = toolExecutor; // 保存执行端口供 Action 限时运行和 Observation 生成使用。
         this.tasks = tasks; // 保存任务注册表供并发保护和资源释放使用。
         this.memory = memory; // 保存记忆端口供每次运行开始时读取一次历史快照。
         this.successfulRuns = successfulRuns; // 保存轨迹端口供最终答案成功后一次性提交完整记录。
@@ -123,7 +132,9 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                     finishSuccessfully(conversationId, currentUserMessage, context, output, assistant.getText(), startedAtNanos); // 持久化完整轨迹后输出最终文本并执行唯一正常收尾。
                     return; // 终止循环，避免最终答案之后再次请求模型。
                 } // 结束最终答案判断分支。
-                executeToolCalls(context, output, assistant.getToolCalls(), startedAtNanos); // 串行执行本轮全部 Action 并回填聚合 Observation。
+                if (executeToolCalls(context, output, assistant.getToolCalls(), startedAtNanos)) { // 串行执行本轮全部 Action，并识别工具等待期间发生的取消。
+                    return; // 取消已由注册表回调完成协议收尾，禁止继续回填或再次调用模型。
+                } // 结束工具执行取消保护分支。
             } // 结束允许工具的模型决策循环。
             if (!context.isCancelled()) { // 正常路径不应静默耗尽轮次，因此先排除主动取消。
                 context.addMessage(new UserMessage("工具调用已达到上限，请基于已有观察立即总结并给出最终答案，不要再调用工具。")); // 向模型明确追加只总结已有信息的收尾指令。
@@ -160,7 +171,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
         context.addMessage(new UserMessage(currentUserMessage)); // 最后加入本次问题，使模型明确当前需要处理的输入。
     } // 结束初始消息装配方法。
 
-    private void executeToolCalls( // 定义一轮内按顺序执行全部工具调用并追加统一响应消息的过程。
+    private boolean executeToolCalls( // 定义一轮内按顺序执行全部工具调用并报告是否因取消提前结束。
             ReactRunContext context, // 接收需要登记消息历史的本轮上下文。
             Sinks.Many<AgentStreamEvent> output, // 接收工具开始和结束事件的输出通道。
             List<AssistantMessage.ToolCall> toolCalls, // 接收模型给出的有序工具调用列表。
@@ -171,15 +182,19 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             if (context.markToolExecution(toolCall.name(), toolCall.arguments())) { // 只有标准化签名第一次出现时才允许真实执行。
                 context.recordFirstResponseTimeMillisIfAbsent(elapsedMillis(startedAtNanos)); // 在首个真实工具 Action 对外可见前冻结首响应耗时。
                 output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 在真实执行前向客户端暴露 Action。
-                observation = tools.execute(toolCall.name(), toolCall.arguments()); // 经过统一错误边界执行本地工具并取得 Observation。
+                observation = toolExecutor.execute(toolCall.name(), toolCall.arguments()); // 经过限时执行端口运行本地工具并取得正常、失败或超时 Observation。
             } else { // 相同工具名和清理首尾空格后的参数已经在本次运行中执行过。
                 output.tryEmitNext(AgentStreamEvent.toolStart(toolCall.name(), toolCall.id(), toolCall.arguments())); // 保持重复调用原有可观察 SSE 协议。
                 observation = "工具调用已跳过：检测到重复调用"; // 生成稳定防循环 Observation，避免重复副作用。
             } // 结束工具签名首次执行判断分支。
-            output.tryEmitNext(AgentStreamEvent.toolEnd(toolCall.name(), toolCall.id(), observation)); // 在执行后输出可关联的工具结束事件。
+            if (context.isCancelled()) { // 工具等待结束前停止请求可能已经取得终止权。
+                return true; // 禁止向已取消运行发送迟到 tool_end、回填 Observation 或继续模型循环。
+            } // 结束工具返回后的取消保护分支。
+            output.tryEmitNext(AgentStreamEvent.toolEnd(toolCall.name(), toolCall.id(), observation)); // 在未取消时输出可关联的工具结束事件。
             responses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolCall.name(), observation)); // 用原调用编号创建模型可理解的工具响应。
         } // 结束本轮有序工具调用循环。
         context.addMessage(ToolResponseMessage.builder().responses(responses).build()); // 把全部 Observation 聚合成紧随 AssistantMessage 的协议消息。
+        return false; // 报告本轮工具调用正常完成，允许循环进入下一次模型决策。
     } // 结束工具调用执行和回填方法。
 
     private void finishSuccessfully( // 定义最终答案的唯一正常终止序列。
