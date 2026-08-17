@@ -13,6 +13,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 // 只加载记忆控制器及测试存储，快速验证 GET 和 DELETE 的 JSON 契约。
 @WebFluxTest(ConversationMemoryController.class)
@@ -122,6 +125,23 @@ class ConversationMemoryControllerTest {
                 .expectStatus().is5xxServerError();
     }
 
+    @Test
+    // 验证未来 JDBC 存储的同步读取不会阻塞承载 HTTP 请求的 WebFlux 事件循环。
+    void shouldReadMemoryOnBoundedElasticScheduler() {
+        // 清空上一次测试可能记录的读取线程名称。
+        memory.clearReadThreadName();
+        // 发起一次正常记忆查询以触发底层 get 调用。
+        client.get()
+                // 使用独立会话编号避免影响其他接口断言。
+                .uri("/api/agent/conversations/thread-check/memory")
+                // 执行 HTTP 请求并等待响应完成。
+                .exchange()
+                // 断言正常读取仍返回成功状态。
+                .expectStatus().isOk();
+        // 断言同步存储访问已被调度到专门承载阻塞任务的线程池。
+        assertThat(memory.readThreadName()).contains("boundedElastic");
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     // 提供仅供 WebFlux 切片测试使用的可控记忆 Bean。
     static class MemoryTestConfiguration {
@@ -138,10 +158,14 @@ class ConversationMemoryControllerTest {
     static final class ConfigurableConversationMemory implements ConversationMemory {
         // 委托生产内存适配器完成正常场景的读写和清空。
         private final ConversationMemory delegate = new InMemoryConversationMemory();
+        // 保存最近一次读取所在的线程名称，供线程边界测试断言。
+        private final AtomicReference<String> readThreadName = new AtomicReference<>();
 
         @Override
         // 读取正常会话历史，并为特殊编号模拟存储不可用。
         public List<ConversationTurn> get(String conversationId) {
+            // 在调用委托前记录当前执行线程，用于确认控制器是否隔离阻塞 I/O。
+            readThreadName.set(Thread.currentThread().getName());
             // 识别测试专用故障会话编号。
             if ("failing-conversation".equals(conversationId)) {
                 // 抛出底层存储异常，验证控制器的错误边界。
@@ -149,6 +173,18 @@ class ConversationMemoryControllerTest {
             }
             // 正常会话委托真实内存适配器返回快照。
             return delegate.get(conversationId);
+        }
+
+        // 清空线程记录，使每次线程边界测试只检查自己触发的读取。
+        private void clearReadThreadName() {
+            // 将记录恢复为空值，避免沿用前一个测试的执行线程。
+            readThreadName.set(null);
+        }
+
+        // 返回最近一次读取线程名称供测试断言。
+        private String readThreadName() {
+            // 获取原子引用中的最新线程名称快照。
+            return readThreadName.get();
         }
 
         @Override

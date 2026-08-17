@@ -22,6 +22,22 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
+        <!-- 引入 JDBC 基础设施，使持久化记忆适配器可以使用 JdbcTemplate 执行数据库操作。 -->
+        <dependency>
+            <!-- 指定 JDBC Starter 的组织坐标。 -->
+            <groupId>org.springframework.boot</groupId>
+            <!-- 启用数据源自动配置、连接池与 JdbcTemplate。 -->
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <!-- 在运行应用时提供 MySQL 协议与驱动实现。 -->
+        <dependency>
+            <!-- 指定 MySQL 官方驱动的组织坐标。 -->
+            <groupId>com.mysql</groupId>
+            <!-- 使用 Spring Boot 管理版本的 MySQL Connector/J 驱动。 -->
+            <artifactId>mysql-connector-j</artifactId>
+            <!-- 仅在运行时需要驱动，编译期只依赖 JDBC 接口。 -->
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
@@ -34,6 +50,15 @@
         <dependency>
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- 为 MySQL 记忆适配器提供不触碰本地真实数据库的 JDBC 集成测试库。 -->
+        <dependency>
+            <!-- 指定 H2 内存数据库的组织坐标。 -->
+            <groupId>com.h2database</groupId>
+            <!-- 使用 H2 的 MySQL 兼容模式验证实际 SQL。 -->
+            <artifactId>h2</artifactId>
+            <!-- 限定 H2 仅出现在测试运行时。 -->
             <scope>test</scope>
         </dependency>
         <dependency>

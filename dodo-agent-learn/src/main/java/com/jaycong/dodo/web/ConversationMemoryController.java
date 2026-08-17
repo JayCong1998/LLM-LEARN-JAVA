@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 
@@ -33,33 +35,39 @@ public class ConversationMemoryController {
     }
 
     @GetMapping("/{conversationId}/memory")
-    // 查询指定会话在请求时刻的不可变历史快照。
-    public MemoryResponse getMemory(
+    // 查询指定会话在请求时刻的不可变历史快照，并将可能阻塞的存储操作隔离出事件循环。
+    public Mono<MemoryResponse> getMemory(
             @PathVariable
             // 接收 URL 路径中的会话编号。
             String conversationId) {
-        try {
-            // 读取一次历史快照并与会话编号一起包装成稳定 JSON 结构。
-            return new MemoryResponse(conversationId, memory.get(conversationId));
-        } catch (RuntimeException error) {
-            // 将存储边界异常转换为稳定服务端错误，避免泄漏实现细节和堆栈。
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "conversation memory unavailable", error);
-        }
+        // 延迟到订阅发生后才读取记忆，使每次 HTTP 请求拥有独立的同步存储调用。
+        return Mono.fromCallable(() ->
+                        // 读取一次历史快照并与会话编号一起包装成稳定 JSON 结构。
+                        new MemoryResponse(conversationId, memory.get(conversationId)))
+                // JDBC 为阻塞 I/O，必须在线程池而非 Netty 事件循环中执行。
+                .subscribeOn(Schedulers.boundedElastic())
+                // 将存储边界异常转换为稳定服务端错误，避免泄漏实现细节和堆栈。
+                .onErrorMap(RuntimeException.class, error ->
+                        // 为前端保留既有 500 响应语义，并将底层异常作为原因保留给服务端日志。
+                        new ResponseStatusException(INTERNAL_SERVER_ERROR, "conversation memory unavailable", error));
     }
 
     @DeleteMapping("/{conversationId}/memory")
-    // 清空指定会话窗口，但不取消已经运行的 Agent 任务。
-    public ClearMemoryResponse clearMemory(
+    // 清空指定会话窗口但不取消已经运行的 Agent 任务，并隔离可能阻塞的数据库删除。
+    public Mono<ClearMemoryResponse> clearMemory(
             @PathVariable
             // 接收 URL 路径中的会话编号。
             String conversationId) {
-        try {
-            // 执行幂等清空并返回调用时是否确实存在窗口。
-            return new ClearMemoryResponse(memory.clear(conversationId));
-        } catch (RuntimeException error) {
-            // 将清空时的存储故障转换为与查询一致的服务端错误边界。
-            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, "conversation memory unavailable", error);
-        }
+        // 延迟到订阅发生后才执行清空，使每次 DELETE 请求拥有独立的同步存储调用。
+        return Mono.fromCallable(() ->
+                        // 执行幂等清空并返回调用时是否确实存在窗口。
+                        new ClearMemoryResponse(memory.clear(conversationId)))
+                // JDBC 删除同样属于阻塞 I/O，必须在线程池中执行。
+                .subscribeOn(Schedulers.boundedElastic())
+                // 将清空时的存储故障转换为与查询一致的服务端错误边界。
+                .onErrorMap(RuntimeException.class, error ->
+                        // 为前端保留既有 500 响应语义，并将底层异常作为原因保留给服务端日志。
+                        new ResponseStatusException(INTERNAL_SERVER_ERROR, "conversation memory unavailable", error));
     }
 
     // 使用不可变 DTO 表达查询接口的会话编号和有序轮次数组。
