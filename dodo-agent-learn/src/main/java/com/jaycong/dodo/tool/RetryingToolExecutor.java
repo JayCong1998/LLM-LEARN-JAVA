@@ -1,6 +1,7 @@
 package com.jaycong.dodo.tool; // 将超时重试策略放在工具包中，避免把可靠性细节混入 ReAct 编排器。
 
 import org.springframework.context.annotation.Primary; // 引入生产装配时优先选择重试端口的标记。
+import org.springframework.beans.factory.annotation.Autowired; // 引入显式指定生产构造器的依赖注入标记。
 import org.springframework.stereotype.Component; // 引入 Spring 自动装配生产重试执行器的组件标记。
 
 /**
@@ -19,6 +20,7 @@ public class RetryingToolExecutor implements ToolExecutionPort { // 定义只处
     private final ToolExecutionPort delegate; // 保存负责单次实际执行的限时端口。
     private final Sleeper sleeper; // 保存可替换的等待边界，以便测试不产生真实延迟。
 
+    @Autowired // 在存在包内测试构造器时明确让 Spring 选择此生产依赖组合。
     public RetryingToolExecutor(TimedToolExecutor delegate) { // 接收具体单次限时 Bean，避免注入自身的 ToolExecutionPort 抽象。
         this(delegate, Thread::sleep); // 生产环境使用可中断的线程休眠实现固定退避。
     } // 结束生产重试执行器构造方法。
