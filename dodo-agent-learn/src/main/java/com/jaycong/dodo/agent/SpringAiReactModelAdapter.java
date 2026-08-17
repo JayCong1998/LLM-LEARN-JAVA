@@ -2,6 +2,7 @@ package com.jaycong.dodo.agent; // 将 Spring AI 实现放在核心端口旁边�
 
 import com.jaycong.dodo.tool.AgentToolRegistry;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
@@ -24,7 +25,9 @@ public class SpringAiReactModelAdapter implements ReactModelPort { // 实现核�
     public SpringAiReactModelAdapter( // 通过构造器显式声明生产模型和工具目录依赖。
             ChatModel chatModel, // 接收 Spring AI 自动配置的具体聊天模型。
             AgentToolRegistry toolRegistry) { // 接收统一工具注册表并结束构造参数列表。
-        this.chatClient = ChatClient.builder(chatModel).build(); // 基于模型创建同步和流式调用均可复用的客户端。
+        this.chatClient = ChatClient.builder(chatModel)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .build(); // 基于模型创建同步和流式调用均可复用的客户端。
         this.toolRegistry = toolRegistry; // 保存工具目录，后续根据每轮开关决定是否暴露回调。
     } // 结束 Spring AI 适配器构造方法。
 
