@@ -40,6 +40,10 @@ class LearningConsoleContractTest {
                 .contains("response.body.getReader()")
                 .contains("event.type === 'tool_start'") // 断言脚本能处理工具开始事件。
                 .contains("event.type === 'tool_end'") // 断言脚本能处理工具结束事件。
+                .contains("event.type === 'tool_retry'") // 断言脚本能处理服务端发送的安全重试计划事件。
+                .contains("handleToolRetry(event)") // 断言重试事件委托给独立处理函数以保持生命周期分支清晰。
+                .contains("event.attempt") // 断言脚本读取即将开始的实际尝试次数。
+                .contains("event.delayMillis") // 断言脚本读取本次尝试前的退避时长。
                 .contains("event.toolCallId") // 断言脚本使用调用编号关联同一张工具卡片。
                 .contains("new AbortController()");
         assertThat(html + javascript) // 合并用户可见页面和交互脚本检查禁用内容。

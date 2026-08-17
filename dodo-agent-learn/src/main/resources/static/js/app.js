@@ -122,6 +122,8 @@ function handleEvent(event) {
         handleToolStart(event); // 把工具名称、调用编号和参数写入轨迹区域。
     } else if (event.type === 'tool_end') { // 收到 Observation 时查找并完成同一次调用卡片。
         handleToolEnd(event); // 用工具执行结果更新对应卡片的状态和内容。
+    } else if (event.type === 'tool_retry') { // 收到安全重试计划时更新已有工具卡片但不创建新的工具生命周期。
+        handleToolRetry(event); // 用调用编号把即将开始的重试状态关联到原工具卡片。
     } else if (event.type === 'error') {
         setStatus(event.content, 'error');
         currentRequestReportedError = true; // 记录 Agent 已明确失败，complete 到达时不得把失败误判为成功。
@@ -164,6 +166,12 @@ function handleToolEnd(event) { // 根据 tool_end 事件完成对应工具卡�
     observation.textContent = event.content; // 安全写入服务端返回的工具结果文本。
     card.append(observation); // 把 Observation 追加在调用参数之后形成完整轨迹。
 } // 结束工具结束事件处理函数。
+
+function handleToolRetry(event) { // 根据 tool_retry 事件更新已开始工具的可观察重试状态。
+    const card = toolCards.get(event.toolCallId); // 使用调用编号查找同一次工具开始事件创建的卡片。
+    if (!card) return; // 开始事件缺失时安全忽略孤立重试事件，避免脚本中断后续 SSE 处理。
+    card.querySelector('.tool-state').textContent = '第 ' + event.attempt + ' 次重试前等待 ' + event.delayMillis + ' ms'; // 仅展示服务端定义的尝试次数与退避时间，不插入模型内容。
+} // 结束工具重试状态处理函数。
 
 function formatArguments(argumentsText) { // 尝试把工具 JSON 参数格式化为更易阅读的缩进文本。
     if (!argumentsText) return '{}'; // 缺少参数时展示明确的空 JSON 对象。
