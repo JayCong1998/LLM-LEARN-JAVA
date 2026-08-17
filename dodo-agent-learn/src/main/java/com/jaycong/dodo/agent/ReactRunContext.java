@@ -1,6 +1,7 @@
 package com.jaycong.dodo.agent; // 将单次 ReAct 可变状态集中在 Agent 核心包中。
 
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -18,19 +19,26 @@ public class ReactRunContext { // 定义单次运行的消息历史、循环防�
 
     private final List<Message> messages; // 按实际发生顺序保存发送给模型的全部消息。
     private final int maxRounds; // 保存允许模型带工具决策的最大轮数。
+    private final CharacterTokenBudget tokenBudget; // 保存只影响模型快照而不修改完整运行历史的固定预算器。
     private final Set<String> executedToolSignatures = new HashSet<>(); // 保存已经真实执行过的工具名称与参数签名。
     private final Set<String> executedToolNames = new LinkedHashSet<>(); // 按首次真实执行顺序保存安全的工具名称快照。
     private final AtomicLong firstResponseTimeMillis = new AtomicLong(-1L); // 保存首次可观察事件耗时，负值表示尚未产生。
     private final AtomicBoolean cancelled = new AtomicBoolean(); // 跨停止线程和模型工作线程共享取消状态。
     private final AtomicBoolean finished = new AtomicBoolean(); // 保护错误、完成和取消路径只发送一次终止序列。
+    private UserMessage currentUserMessage; // 保存本轮显式当前问题对象以与同文本历史消息精确区分。
     private int round; // 记录已经成功开始的工具决策轮数，受同步方法保护。
 
     public ReactRunContext(List<Message> initialMessages, int maxRounds) { // 接收本轮初始上下文和明确的循环上限。
+        this(initialMessages, maxRounds, new CharacterTokenBudget()); // 为生产运行固定装配默认两千 Token 预算器。
+    } // 结束默认预算运行上下文构造方法。
+
+    ReactRunContext(List<Message> initialMessages, int maxRounds, CharacterTokenBudget tokenBudget) { // 接收测试或后续配置所需的明确预算器。
         if (maxRounds < 1) { // 拒绝无法执行任何正常决策的无效配置。
             throw new IllegalArgumentException("maxRounds must be positive"); // 在启动任务前暴露配置错误。
         } // 结束最大轮次校验分支。
         this.messages = new ArrayList<>(initialMessages); // 复制初始消息，避免调用方随后修改内部历史。
         this.maxRounds = maxRounds; // 保存不可变轮次上限供每轮开始前检查。
+        this.tokenBudget = tokenBudget; // 保存独立预算器以只在导出模型快照时执行裁剪。
     } // 结束 ReAct 运行上下文构造方法。
 
     public synchronized void addMessage(Message message) { // 串行追加一条系统、用户、助手或工具响应消息。
@@ -40,6 +48,17 @@ public class ReactRunContext { // 定义单次运行的消息历史、循环防�
     public synchronized List<Message> messages() { // 获取当前完整消息历史的只读快照。
         return List.copyOf(messages); // 复制并冻结列表，避免模型端或测试修改运行状态。
     } // 释放上下文锁并结束消息快照方法。
+
+    public synchronized void setCurrentUserMessage(UserMessage currentUserMessage) { // 标记本轮 HTTP 请求对应且不可裁剪的用户问题对象。
+        this.currentUserMessage = currentUserMessage; // 保存对象身份，避免相同文本的历史问题被误认为当前问题。
+    } // 释放上下文锁并结束当前用户问题标记方法。
+
+    public synchronized List<Message> messagesWithinBudget() { // 导出满足固定预算的模型调用快照而不改写完整运行历史。
+        if (currentUserMessage == null) { // 初始化尚未标记当前问题时无法安全确定必需消息边界。
+            throw new IllegalStateException("当前用户问题尚未初始化"); // 阻止模型在缺少当前问题语义的情况下调用。
+        } // 结束当前问题初始化保护分支。
+        return tokenBudget.messagesWithinBudget(messages, currentUserMessage); // 基于完整消息快照生成冻结的预算内模型输入。
+    } // 释放上下文锁并结束预算消息快照方法。
 
     public synchronized boolean tryStartDecisionRound() { // 尝试在最大轮次范围内开始下一次允许工具的模型决策。
         if (round >= maxRounds) { // 已达到上限时拒绝第五次及之后的工具决策。

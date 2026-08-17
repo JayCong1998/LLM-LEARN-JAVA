@@ -123,7 +123,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
                 return; // 丢弃已经加载的快照，不再调用模型或产生普通终止事件。
             } // 结束历史加载后的取消保护分支。
             while (!context.isCancelled() && context.tryStartDecisionRound()) { // 在未取消且未超过四轮时继续请求下一步决策。
-                AssistantMessage assistant = model.decide(context.messages(), true); // 携带完整消息历史并允许模型选择工具。
+                AssistantMessage assistant = model.decide(context.messagesWithinBudget(), true); // 仅携带预算内快照并允许模型选择工具，完整历史仍留在运行上下文。
                 if (context.isCancelled()) { // 模型阻塞返回时任务可能已被停止，因此结果落库前再次检查。
                     return; // 丢弃取消后迟到的模型结果，不向已终止客户端继续输出。
                 } // 结束模型返回后的取消保护分支。
@@ -138,7 +138,7 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             } // 结束允许工具的模型决策循环。
             if (!context.isCancelled()) { // 正常路径不应静默耗尽轮次，因此先排除主动取消。
                 context.addMessage(new UserMessage("工具调用已达到上限，请基于已有观察立即总结并给出最终答案，不要再调用工具。")); // 向模型明确追加只总结已有信息的收尾指令。
-                AssistantMessage finalAssistant = model.decide(context.messages(), false); // 关闭全部工具能力发起最后一次同步决策。
+                AssistantMessage finalAssistant = model.decide(context.messagesWithinBudget(), false); // 使用同一预算规则关闭工具并发起最后一次同步决策。
                 if (context.isCancelled()) { // 收尾模型调用返回后再次检查任务是否已被并发停止。
                     return; // 丢弃取消之后迟到的强制总结结果。
                 } // 结束收尾模型返回后的取消保护分支。
@@ -168,7 +168,9 @@ public class ManualReactAgent { // 定义阶段二用于教学和后续扩展的
             context.addMessage(new UserMessage(turn.userContent())); // 把历史问题恢复成模型可识别的用户角色消息。
             context.addMessage(new AssistantMessage(turn.assistantContent())); // 把对应最终回答恢复成助手角色消息并保持问答配对。
         } // 结束历史轮次回放循环。
-        context.addMessage(new UserMessage(currentUserMessage)); // 最后加入本次问题，使模型明确当前需要处理的输入。
+        UserMessage currentMessage = new UserMessage(currentUserMessage); // 创建本轮唯一的当前用户消息对象以建立不可裁剪边界。
+        context.setCurrentUserMessage(currentMessage); // 在加入完整历史前显式标记当前问题，避免与历史同文本问题混淆。
+        context.addMessage(currentMessage); // 最后加入本次问题，使模型明确当前需要处理的输入。
     } // 结束初始消息装配方法。
 
     private boolean executeToolCalls( // 定义一轮内按顺序执行全部工具调用并报告是否因取消提前结束。

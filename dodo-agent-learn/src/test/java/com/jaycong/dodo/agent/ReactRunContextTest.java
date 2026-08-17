@@ -1,7 +1,9 @@
 package com.jaycong.dodo.agent; // 将单次运行上下文测试放在 Agent 核心包中。
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.List;
@@ -50,4 +52,19 @@ class ReactRunContextTest { // 定义消息、轮次、去重与终止状态的�
         assertThat(context.tryFinish()).isFalse(); // 后续终止路径不能重复发送 complete。
         assertThat(context.isFinished()).isTrue(); // 断言完成状态对所有线程可见。
     } // 结束取消与完成原子状态测试。
+
+    @Test
+    void exportsOnlyBudgetedSnapshotWhileKeepingFullRunHistory() { // 验证模型快照可裁剪，但运行上下文仍完整保存可观察消息历史。
+        SystemMessage system = new SystemMessage("系统提示"); // 创建本轮不可裁剪的系统规则。
+        UserMessage oldQuestion = new UserMessage("旧问题旧问题旧问题旧问题"); // 创建可被裁剪的历史问题。
+        AssistantMessage oldAnswer = new AssistantMessage("旧回答旧回答旧回答旧回答"); // 创建应与历史问题整体裁剪的历史回答。
+        UserMessage currentQuestion = new UserMessage("当前问题"); // 创建本轮必须保留的显式问题。
+        ReactRunContext context = new ReactRunContext(List.<Message>of(system, oldQuestion, oldAnswer), 4, new CharacterTokenBudget(15)); // 创建携带小预算器的独立运行上下文。
+
+        context.setCurrentUserMessage(currentQuestion); // 标记当前问题，避免与相同文本的历史消息混淆。
+        context.addMessage(currentQuestion); // 按真实运行顺序把当前问题追加到完整历史。
+
+        assertThat(context.messagesWithinBudget()).containsExactly(system, currentQuestion); // 断言模型仅收到满足预算的必需消息快照。
+        assertThat(context.messages()).containsExactly(system, oldQuestion, oldAnswer, currentQuestion); // 断言完整运行历史没有被裁剪或改写。
+    } // 结束模型快照与完整历史隔离测试。
 } // 结束 ReAct 运行上下文测试类。

@@ -222,6 +222,21 @@ class ManualReactAgentTest { // 定义 ReAct 正常决策、工具执行和消�
         assertThat(model.messageSnapshots).hasSize(1); // 断言取消后没有再用工具结果请求第二轮模型。
     } // 结束等待工具取消测试。
 
+    @Test
+    void rejectsOversizedMandatoryContextBeforeCallingModelOrPersistingMemory() { // 验证当前问题与系统提示超过固定预算时不会启动模型或成功持久化。
+        ScriptedModel model = new ScriptedModel(new AssistantMessage("不应调用模型")); // 配置一条理论上不应被消费的模型回答。
+        InMemoryConversationMemory memory = new InMemoryConversationMemory(); // 创建可检查是否被错误写入的内存记忆。
+        ManualReactAgent agent = new ManualReactAgent(model, new AgentToolRegistry(List.of()), new InMemoryTaskRegistry(), memory); // 组装使用真实记忆端口的 Agent。
+        String oversizedQuestion = "问题".repeat(8_000); // 创建足以使系统提示和当前问题超过两千估算 Token 的输入。
+
+        StepVerifier.create(agent.stream("conversation-budget-overflow", oversizedQuestion)) // 订阅必需上下文超预算的真实 Agent 流。
+                .expectNext(AgentStreamEvent.error("上下文预算不足：系统提示和当前问题已超过 2000 Token")) // 断言返回稳定预算错误而非截断后继续请求模型。
+                .expectNext(AgentStreamEvent.complete()) // 断言拒绝路径仍按 SSE 协议完成。
+                .verifyComplete(); // 断言流正常关闭而不泄漏 Reactor 异常。
+        assertThat(model.messageSnapshots).isEmpty(); // 断言模型端口从未接收到不安全的超大上下文。
+        assertThat(memory.get("conversation-budget-overflow")).isEmpty(); // 断言失败拒绝路径没有留下成功问答记忆。
+    } // 结束必需上下文超预算保护测试。
+
     private ManualReactAgent agent(ReactModelPort model, List<ToolCallback> callbacks, InMemoryTaskRegistry tasks) { // 统一组装支持任意假模型端口的手写 Agent。
         return new ManualReactAgent(model, new AgentToolRegistry(callbacks), tasks, new InMemoryConversationMemory()); // 注入脚本模型、真实注册表、任务生命周期组件和独立空记忆。
     } // 结束测试 Agent 工厂方法。
