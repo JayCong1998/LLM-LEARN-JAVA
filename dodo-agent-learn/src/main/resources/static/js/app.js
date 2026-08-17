@@ -11,6 +11,10 @@ const memoryStatus = document.querySelector('#memory-status'); // 保存记忆�
 const refreshMemoryButton = document.querySelector('#refresh-memory'); // 保存只读取当前会话历史的按钮。
 const clearMemoryButton = document.querySelector('#clear-memory'); // 保存显式删除当前会话历史的按钮。
 const memoryTurns = document.querySelector('#memory-turns'); // 保存动态创建的历史问答条目容器。
+const runTraceCount = document.querySelector('#run-trace-count'); // 保存运行轨迹数量展示节点。
+const runTraceStatus = document.querySelector('#run-trace-status'); // 保存运行轨迹状态展示节点。
+const refreshRunTracesButton = document.querySelector('#refresh-run-traces'); // 保存手动刷新轨迹按钮。
+const runTraces = document.querySelector('#run-traces'); // 保存运行轨迹卡片容器。
 
 document.querySelector('#conversation-id').textContent = conversationId;
 
@@ -36,6 +40,10 @@ function setMemoryStatus(text, state) { // 统一设置记忆面板的可见状�
 function memoryApiUrl() { // 按当前固定 conversationId 组装会话记忆资源地址。
     return '/api/agent/conversations/' + encodeURIComponent(conversationId) + '/memory'; // 对会话编号编码后返回 GET 和 DELETE 共用路径。
 } // 结束会话记忆接口地址构造函数。
+
+function runTraceApiUrl() { return '/api/agent/conversations/' + encodeURIComponent(conversationId) + '/runs'; } // 组装当前会话只读运行轨迹地址。
+function renderRunTraces(runs) { runTraces.replaceChildren(); runTraceCount.textContent = runs.length + '/10'; for (const run of runs) { const card = document.createElement('article'); card.className = 'run-trace'; const content = document.createElement('p'); content.textContent = '工具：' + (run.tools || '[]') + '；首响应：' + run.firstResponseTimeMillis + 'ms；总耗时：' + run.totalResponseTimeMillis + 'ms；类型：' + run.agentType + '；时间：' + run.createdAt; card.append(content); runTraces.append(card); } } // 使用 textContent 安全展示允许的轨迹字段。
+async function refreshRunTraces() { refreshRunTracesButton.disabled = true; runTraceStatus.textContent = '正在加载运行轨迹'; runTraceStatus.dataset.state = 'loading'; try { const response = await fetch(runTraceApiUrl()); if (!response.ok) throw new Error('读取运行轨迹失败，HTTP ' + response.status); const payload = await response.json(); if (!Array.isArray(payload.runs)) throw new Error('读取运行轨迹失败，响应缺少数组'); renderRunTraces(payload.runs); runTraceStatus.textContent = '已加载运行轨迹'; runTraceStatus.dataset.state = 'complete'; } catch (error) { runTraceStatus.textContent = error.message; runTraceStatus.dataset.state = 'error'; } finally { refreshRunTracesButton.disabled = false; } } // 独立查询失败不会影响聊天和记忆面板。
 
 function renderMemoryTurns(turns) { // 将后端返回的完整问答轮次安全渲染为 DOM 节点。
     memoryTurns.replaceChildren(); // 先删除旧快照，避免刷新后重复累积历史条目。
@@ -123,6 +131,7 @@ function handleEvent(event) {
         } // 结束 SSE 成功终止显示分支。
         if (!currentRequestReportedError && currentRequestReceivedAnswer) { // 只有成功最终回答后才读取最新跨请求记忆。
             void refreshMemory(); // 异步刷新不阻塞 SSE 帧处理与流关闭。
+            void refreshRunTraces(); // 成功运行已持久化后刷新安全轨迹。
         } // 结束成功回答后的记忆自动刷新分支。
     }
 }
@@ -254,6 +263,7 @@ async function stopMessage() {
 sendButton.addEventListener('click', sendMessage);
 stopButton.addEventListener('click', stopMessage);
 refreshMemoryButton.addEventListener('click', refreshMemory); // 绑定只查询当前会话历史的显式刷新交互。
+refreshRunTracesButton.addEventListener('click', refreshRunTraces); // 绑定只读运行轨迹刷新交互。
 clearMemoryButton.addEventListener('click', clearMemory); // 绑定显式删除当前会话历史的交互。
 messageInput.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -263,3 +273,4 @@ messageInput.addEventListener('keydown', event => {
 });
 
 void refreshMemory(); // 页面加载后主动读取一次历史，以区分尚未加载和真正没有历史两种状态。
+void refreshRunTraces(); // 页面加载后读取当前会话已成功保存的运行轨迹。

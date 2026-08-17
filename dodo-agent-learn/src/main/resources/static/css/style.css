@@ -70,6 +70,11 @@ h1 {
     margin-top: 24px;
 }
 
+.run-trace-panel { margin-top: 24px; }
+.run-traces { display: grid; gap: 10px; }
+.run-trace { border: 1px solid #d8e0ea; border-radius: 10px; padding: 12px; background: #fbfcfe; }
+.run-trace p { margin: 4px 0; overflow-wrap: anywhere; }
+
 /* 记忆标题栏让轮次数量和操作按钮保持同一视觉层级。 */
 .memory-header {
     /* 使用弹性布局让标题和操作按钮在宽屏时自然分居两侧。 */

@@ -46,6 +46,18 @@
     <!-- 结束跨请求会话记忆面板。 -->
     </section>
 
+    <!-- 运行轨迹只展示已成功持久化的安全元数据，不混入模型上下文。 -->
+    <section id="run-trace-panel" class="run-trace-panel" aria-label="运行轨迹">
+        <div class="memory-header">
+            <h2>运行轨迹 <span id="run-trace-count">尚未加载</span></h2>
+            <div class="memory-actions">
+                <button id="refresh-run-traces" class="secondary" type="button">刷新轨迹</button>
+            </div>
+        </div>
+        <p id="run-trace-status" class="memory-status" data-state="ready">尚未加载运行轨迹</p>
+        <div id="run-traces" class="run-traces" aria-live="polite"></div>
+    </section>
+
     <section class="input-panel">
         <label for="message">发送给模型的消息</label>
         <textarea id="message" rows="5" placeholder="例如：用一句话解释什么是 Agent" autofocus></textarea>
