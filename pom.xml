@@ -19,6 +19,7 @@
         <module>springai</module>
         <module>dodo-agent-learn</module>
         <module>spring-webflux-learn</module>
+        <module>know-engine-learn</module>
     </modules>
 
 
