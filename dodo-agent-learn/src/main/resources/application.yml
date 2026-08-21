@@ -2,11 +2,11 @@ spring:
   # 声明持久化会话记忆使用的 JDBC 数据源配置。
   datasource:
     # 默认连接本机 dodo 数据库，但允许部署环境通过变量替换地址。
-    url: ${DODO_DB_URL:jdbc:mysql://127.0.0.1:3306/dodo?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8}
+    url: jdbc:mysql://127.0.0.1:3306/dodo?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=GMT%2B8
     # 默认使用本机学习环境的 root 用户，但允许部署环境通过变量替换用户名。
-    username: ${DODO_DB_USERNAME:root}
+    username: root
     # 强制从环境变量读取密码，避免将任何数据库密码提交到仓库。
-    password: ${DODO_DB_PASSWORD:root}
+    password: root
     # 指定 MySQL Connector/J 的 JDBC 驱动类型。
     driver-class-name: com.mysql.cj.jdbc.Driver
   application:
@@ -17,6 +17,12 @@ spring:
       base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
-          model: qwen3.7-max-2026-05-17
+          model: qwen-plus
 server:
-  port: ${SERVER_PORT:8080}
+  port: 8080
+
+
+  # Tavily 搜索引擎配置
+tavily:
+  api-key: ${tavily_api_key}  # 记得改成你自己的
+  mcp-url: https://mcp.tavily.com/mcp/

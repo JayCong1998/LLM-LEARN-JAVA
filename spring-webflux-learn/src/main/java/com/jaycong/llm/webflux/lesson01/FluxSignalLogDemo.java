@@ -14,8 +14,8 @@ public final class FluxSignalLogDemo {
     }
 
     public static void main(String[] args) {
-        observeSuccessfulFlow();
-//        observeFailedFlow();
+//        observeSuccessfulFlow();
+        observeFailedFlow();
     }
 
     private static void observeSuccessfulFlow() {
