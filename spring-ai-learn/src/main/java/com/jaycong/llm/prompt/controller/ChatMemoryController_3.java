@@ -19,6 +19,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.chat.memory.autoconfigure.ChatMemoryAutoConfiguration;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -48,8 +49,12 @@ public class ChatMemoryController_3 implements InitializingBean {
     @Autowired
     private ChatMemory chatMemory;
 
+    @Value("${dashcode_key}")
+    private String apiKey;
+
     @GetMapping("/callConversation")
     public Flux<String> callConversation(String message, String chatId) {
+        System.out.println(apiKey);
         return chatClient
                 .prompt()
                 .user(message)

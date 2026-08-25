@@ -9,7 +9,7 @@
     </appender>
 
     <!-- 设置根日志级别为 DEBUG -->
-    <root level="DEBUG">
+    <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>
 

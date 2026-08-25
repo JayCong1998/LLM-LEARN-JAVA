@@ -13,7 +13,7 @@ spring:
       base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
       chat:
         options:
-          model: qwen3.7-max-2026-05-17
+          model: qwen-plus
   datasource:
     url: jdbc:mysql://localhost:3306/llm?useUnicode=true&characterEncoding=UTF-8  # 记得改成你自己的
     username: root  # 记得改成你自己的

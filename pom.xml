@@ -16,7 +16,7 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <modules>
-        <module>springai</module>
+        <module>spring-ai-learn</module>
         <module>dodo-agent-learn</module>
         <module>spring-webflux-learn</module>
         <module>know-engine-learn</module>
