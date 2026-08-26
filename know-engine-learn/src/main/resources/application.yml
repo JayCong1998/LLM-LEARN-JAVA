@@ -7,3 +7,11 @@ spring:
     # 本机默认 root；部署环境请设置 DB_PASSWORD 覆盖该值。
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+langchain4j:
+  open-ai:
+    chat-model:
+      # 仅从环境变量读取密钥，避免把真实凭证提交到学习仓库。
+      api-key: ${dashcode_key:}
+      base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
+      model-name: qwen-plus
