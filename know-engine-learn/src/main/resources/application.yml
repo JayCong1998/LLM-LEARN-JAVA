@@ -15,3 +15,8 @@ langchain4j:
       api-key: ${dashcode_key:}
       base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
       model-name: qwen-plus
+    streaming-chat-model:
+      # 流式模型使用相同的 OpenAI 兼容服务与密钥。
+      api-key: ${dashcode_key:}
+      base-url: https://llm-vgk8ko4szwiojh06.cn-beijing.maas.aliyuncs.com/compatible-mode
+      model-name: qwen-plus
