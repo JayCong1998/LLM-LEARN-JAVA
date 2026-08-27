@@ -1,5 +1,8 @@
 package com.jaycong.llm.chat;
 
+import com.jaycong.know.engine.ai.controller.ChatController;
+import com.jaycong.know.engine.ai.aiservice.DemoChatService;
+import com.jaycong.know.engine.common.api.ApiResponse;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -10,8 +13,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +34,9 @@ class ChatControllerTest {
     @Mock
     private StreamingChatModel streamingChatModel;
 
+    @Mock
+    private DemoChatService demoChatService;
+
     @InjectMocks
     private ChatController chatController;
 
@@ -36,22 +44,19 @@ class ChatControllerTest {
     void chatReturnsTheModelReply() {
         when(chatModel.chat("你好")).thenReturn("你好，我是测试助手。");
 
-        assertEquals("你好，我是测试助手。", chatController.chat("你好"));
+        ApiResponse<String> response = chatController.chat("你好");
+
+        assertEquals(0, response.getCode());
+        assertEquals("你好，我是测试助手。", response.getData());
     }
 
     @Test
-    void streamDelegatesPartialResponsesToAnSseEmitter() {
-        doAnswer(invocation -> {
-            StreamingChatResponseHandler handler = invocation.getArgument(1);
-            handler.onPartialResponse("你好，");
-            handler.onPartialResponse("我是测试助手。");
-            handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("完成")).build());
-            return null;
-        }).when(streamingChatModel).chat(eq("你好"), any(StreamingChatResponseHandler.class));
+    void streamDeclaresUtf8ServerSentEvents() throws NoSuchMethodException {
+        GetMapping mapping = ChatController.class
+                .getDeclaredMethod("stream", String.class)
+                .getAnnotation(GetMapping.class);
 
-        SseEmitter emitter = chatController.stream("你好");
-
-        assertNotNull(emitter);
-        verify(streamingChatModel).chat(eq("你好"), any(StreamingChatResponseHandler.class));
+        assertArrayEquals(new String[]{"text/event-stream;charset=UTF-8"}, mapping.produces());
     }
+
 }

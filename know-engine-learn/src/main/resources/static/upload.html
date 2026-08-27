@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识文档上传</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 500px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 24px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="file"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .file-input-wrapper {
+            position: relative;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .file-input-wrapper:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .file-icon {
+            font-size: 48px;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .file-text {
+            color: #666;
+            font-size: 14px;
+        }
+        .file-name {
+            margin-top: 10px;
+            color: #667eea;
+            font-weight: 500;
+            word-break: break-all;
+        }
+        .upload-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .upload-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+        .upload-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            color: #666;
+            font-size: 14px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            display: none;
+        }
+        .result.success {
+            display: block;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .result.error {
+            display: block;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .result-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .result-content {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .split-form {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 12px;
+            border: 1px solid #e0e0e0;
+        }
+        .split-form h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .split-form .form-group {
+            margin-bottom: 15px;
+        }
+        .split-form input[type="text"],
+        .split-form input[type="number"] {
+            width: 100%;
+            padding: 10px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .split-form input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .split-form select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            background-color: white;
+            cursor: pointer;
+        }
+        .split-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+        .split-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(40, 167, 69, 0.4);
+        }
+        .split-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .param-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+        .param-group {
+            display: none;
+        }
+        .param-group.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 知识文档上传</h1>
+
+        <div style="display:flex;gap:10px;justify-content:center;margin-bottom:20px;">
+            <a href="/document.html" style="padding:8px 16px;background:#f0f4ff;color:#667eea;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">📄 文档管理</a>
+            <a href="/chat.html" style="padding:8px 16px;background:#f0fff4;color:#28a745;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">💬 AI 对话</a>
+        </div>
+
+        <form id="uploadForm">
+            <div class="form-group">
+                <label>选择文件 *</label>
+                <div class="file-input-wrapper" id="fileWrapper">
+                    <input type="file" id="file" name="file" required>
+                    <div class="file-icon">📁</div>
+                    <div class="file-text">点击或拖拽文件到此处</div>
+                    <div class="file-name" id="fileName"></div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="title">文档标题 *</label>
+                <input type="text" id="title" name="title" placeholder="请输入文档标题" required>
+            </div>
+
+            <div class="form-group">
+                <label for="version">文档版本</label>
+                <input type="text" id="version" name="version" value="1.0.0" placeholder="例如：1.0.0">
+            </div>
+
+            <div class="form-group">
+                <label for="description">文档描述 *</label>
+                <input type="text" id="description" name="description" placeholder="请输入文档描述" required>
+            </div>
+
+            <div class="form-group">
+                <label for="knowledgeBaseType">知识库类型 *</label>
+                <select id="knowledgeBaseType" name="knowledgeBaseType" required style="width:100%;padding:12px 16px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;transition:border-color 0.3s;background-color:white;cursor:pointer;">
+                    <option value="">请选择知识库类型</option>
+                    <option value="DOCUMENT_SEARCH" selected>文档搜索 (DOCUMENT_SEARCH)</option>
+                    <option value="DATA_QUERY">数据查询 (DATA_QUERY)</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="tableNameGroup" style="display:none;">
+                <label for="tableName">数据表名称 * <small style="color:#999;font-weight:normal;">(仅支持小写字母、数字、下划线)</small></label>
+                <input type="text" id="tableName" name="tableName" placeholder="请输入数据表名称" pattern="^[a-z0-9_]+$">
+                <div id="tableNameError" style="color:#dc3545;font-size:12px;margin-top:4px;display:none;">只能包含小写字母、数字和下划线</div>
+            </div>
+
+            <button type="submit" class="upload-btn" id="uploadBtn">开始上传</button>
+        </form>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">0%</div>
+        </div>
+
+        <div class="result" id="result">
+            <div class="result-title" id="resultTitle"></div>
+            <div class="result-content" id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file');
+        const fileName = document.getElementById('fileName');
+        const fileWrapper = document.getElementById('fileWrapper');
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const result = document.getElementById('result');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+        const knowledgeBaseTypeSelect = document.getElementById('knowledgeBaseType');
+        const tableNameGroup = document.getElementById('tableNameGroup');
+        const tableNameInput = document.getElementById('tableName');
+        const tableNameError = document.getElementById('tableNameError');
+
+        // tableName 输入验证（只允许小写字母、数字、下划线）
+        tableNameInput.addEventListener('input', function() {
+            const value = this.value;
+            const validPattern = /^[a-z0-9_]*$/;
+            if (value && !validPattern.test(value)) {
+                tableNameError.style.display = 'block';
+                this.style.borderColor = '#dc3545';
+            } else {
+                tableNameError.style.display = 'none';
+                this.style.borderColor = '#e0e0e0';
+            }
+        });
+
+        // 知识库类型选择变化时，显示/隐藏数据表名称输入框
+        knowledgeBaseTypeSelect.addEventListener('change', function() {
+            if (this.value === 'DATA_QUERY') {
+                tableNameGroup.style.display = 'block';
+                tableNameInput.required = true;
+            } else {
+                tableNameGroup.style.display = 'none';
+                tableNameInput.required = false;
+                tableNameInput.value = '';
+                tableNameError.style.display = 'none';
+            }
+        });
+
+        // 文件选择显示，并自动提取文件名填充标题和描述
+        fileInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const file = this.files[0];
+                const fullName = file.name;
+                fileName.textContent = fullName;
+                // 去掉扩展名作为标题和描述
+                const lastDotIdx = fullName.lastIndexOf('.');
+                const baseName = lastDotIdx > 0 ? fullName.substring(0, lastDotIdx) : fullName;
+                // 仅在用户尚未手动输入时自动填充
+                const titleInput = document.getElementById('title');
+                const descInput = document.getElementById('description');
+                if (!titleInput.value.trim()) {
+                    titleInput.value = baseName;
+                }
+                if (!descInput.value.trim()) {
+                    descInput.value = baseName;
+                }
+            }
+        });
+
+        // 拖拽上传
+        fileWrapper.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileWrapper.style.borderColor = '#667eea';
+            fileWrapper.style.background = '#f8f9ff';
+        });
+
+        fileWrapper.addEventListener('dragleave', () => {
+            fileWrapper.style.borderColor = '#ccc';
+            fileWrapper.style.background = 'transparent';
+        });
+
+        fileWrapper.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileWrapper.style.borderColor = '#ccc';
+            fileWrapper.style.background = 'transparent';
+            
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                fileInput.files = e.dataTransfer.files;
+                const fullName = e.dataTransfer.files[0].name;
+                fileName.textContent = fullName;
+                // 去掉扩展名作为标题和描述
+                const lastDotIdx = fullName.lastIndexOf('.');
+                const baseName = lastDotIdx > 0 ? fullName.substring(0, lastDotIdx) : fullName;
+                const titleInput = document.getElementById('title');
+                const descInput = document.getElementById('description');
+                if (!titleInput.value.trim()) {
+                    titleInput.value = baseName;
+                }
+                if (!descInput.value.trim()) {
+                    descInput.value = baseName;
+                }
+            }
+        });
+
+        // 表单提交
+        uploadForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                showResult('error', '请选择要上传的文件');
+                return;
+            }
+
+            // 如果选择的是数据查询类型，验证tableName
+            const knowledgeBaseTypeValue = document.getElementById('knowledgeBaseType').value;
+            if (knowledgeBaseTypeValue === 'DATA_QUERY') {
+                const tableNameValue = tableNameInput.value.trim();
+                if (!tableNameValue) {
+                    showResult('error', '请输入数据表名称', '数据查询类型必须填写数据表名称');
+                    tableNameInput.focus();
+                    return;
+                }
+                // 验证tableName格式
+                const tableNamePattern = /^[a-z0-9_]+$/;
+                if (!tableNamePattern.test(tableNameValue)) {
+                    showResult('error', '数据表名称格式错误', '只能包含小写字母、数字和下划线');
+                    tableNameInput.focus();
+                    return;
+                }
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('title', document.getElementById('title').value);
+            formData.append('version', document.getElementById('version').value.trim() || '1.0.0');
+            formData.append('description', document.getElementById('description').value);
+            formData.append('knowledgeBaseType', document.getElementById('knowledgeBaseType').value);
+            // 如果有tableName则添加
+            if (knowledgeBaseTypeValue === 'DATA_QUERY') {
+                formData.append('tableName', tableNameInput.value.trim());
+            }
+
+            // 重置状态
+            result.className = 'result';
+            progressContainer.style.display = 'block';
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '上传中...';
+
+            try {
+                const xhr = new XMLHttpRequest();
+                
+                // 进度监听
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        progressFill.style.width = percent + '%';
+                        progressText.textContent = percent + '%';
+                    }
+                });
+
+                // 完成监听
+                xhr.addEventListener('load', () => {
+                    progressContainer.style.display = 'none';
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = '开始上传';
+
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        let response;
+                        try {
+                            response = JSON.parse(xhr.responseText);
+                        } catch (error) {
+                            showResult('error', '上传失败', '服务端返回的数据格式不正确');
+                            return;
+                        }
+
+                        if (response.code === 0) {
+                            showResult('success', '上传成功！', response.message || '文档已上传');
+                            uploadForm.reset();
+                            document.getElementById('version').value = '1.0.0';
+                            fileName.textContent = '';
+                            setTimeout(() => { window.location.href = '/document.html'; }, 1500);
+                        } else {
+                            showResult('error', '上传失败', response.message || '服务端未返回失败原因');
+                        }
+                    } else {
+                        let errorMsg = '服务器返回错误：' + xhr.status;
+                        try {
+                            const respText = xhr.responseText.trim();
+                            if (respText) errorMsg = respText;
+                        } catch (e) {}
+                        showResult('error', '上传失败', errorMsg);
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    progressContainer.style.display = 'none';
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = '开始上传';
+                    showResult('error', '上传失败', '网络请求出错，请检查网络连接');
+                });
+
+                xhr.open('POST', '/api/document/upload');
+                xhr.send(formData);
+
+            } catch (error) {
+                progressContainer.style.display = 'none';
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '开始上传';
+                showResult('error', '上传失败', error.message);
+            }
+        });
+
+        function showResult(type, title, content = '') {
+            result.className = 'result ' + type;
+            resultTitle.textContent = title;
+            resultContent.textContent = content;
+        }
+    </script>
+</body>
+</html>
