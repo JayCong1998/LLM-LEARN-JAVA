@@ -639,8 +639,10 @@
             try {
                 const res = await fetch(`/api/document/page?${params}`);
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                const page = await res.json();
-                totalPages = page.pages || 1;
+                const result = await res.json();
+                if (result.code !== 0) throw new Error(result.message || '查询文档列表失败');
+                const page = result.data;
+                totalPages = page.totalPages || 1;
                 totalRecords = page.total || 0;
                 renderTable(page.records || []);
                 renderPagination();

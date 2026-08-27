@@ -23,6 +23,17 @@ public class KnowledgeDocument extends BaseEntity {
      * 文档处理状态。
      */
     private String status;
+
+    /**
+     * 原文档地址
+     */
+    private String docUrl;
+
+    /**
+     * 转换后的文档地址
+     */
+    private String convertedDocUrl;
+
     /**
      * 文档描述。
      */
