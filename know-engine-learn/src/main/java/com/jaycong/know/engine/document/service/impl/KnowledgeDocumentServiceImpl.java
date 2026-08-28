@@ -1,11 +1,13 @@
 package com.jaycong.know.engine.document.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.jaycong.know.engine.common.api.PageResponse;
 import com.jaycong.know.engine.common.error.BusinessException;
 import com.jaycong.know.engine.common.error.ErrorCode;
 import com.jaycong.know.engine.document.constant.DocumentStatus;
+import com.jaycong.know.engine.document.constant.KnowledgeBaseType;
 import com.jaycong.know.engine.document.dto.DocumentRequest;
 import com.jaycong.know.engine.document.dto.DocumentUploadParam;
 import com.jaycong.know.engine.document.entity.KnowledgeDocument;
@@ -65,7 +67,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             throw new IllegalArgumentException("title must not be blank");
         KnowledgeDocument document = new KnowledgeDocument();
         apply(document, documentRequest);
-        document.setStatus("INIT");
+        document.setStatus(DocumentStatus.INIT);
         document.setDeleted(0);
         documentMapper.insert(document);
         return document;
@@ -133,6 +135,13 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         return document;
     }
 
+    @Override
+    public void updateStatus(Long documentId, DocumentStatus status) {
+        LambdaUpdateWrapper<KnowledgeDocument> queryWrapper = new LambdaUpdateWrapper<>();
+        queryWrapper.set(KnowledgeDocument::getStatus, status).eq(KnowledgeDocument::getId, documentId);
+        documentMapper.update(queryWrapper);
+    }
+
     /**
      * 软删除指定知识文档。
      *
@@ -140,31 +149,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      */
     @Override
     public void delete(Long id) {
-        KnowledgeDocument document = get(id);
-        document.setDeleted(1);
-        documentMapper.updateById(document);
-    }
-
-    /**
-     * 处理文件上传请求，将请求参数转换为持久化所需的字段。
-     *
-     * @param request 文件上传请求参数
-     */
-    @Override
-    public void uploadFile(DocumentUploadParam request) {
-        KnowledgeDocument knowledgeDocument = new KnowledgeDocument();
-        knowledgeDocument.setDocTitle(request.title());
-        knowledgeDocument.setDescription(request.description());
-        knowledgeDocument.setStatus(DocumentStatus.INIT.name());
-        knowledgeDocument.setKnowledgeBaseType(request.knowledgeBaseType());
-        try {
-            //上传文档获取文件路径
-            String fileUrl = fileStorageService.uploadFile(request.file(), request.file().getOriginalFilename());
-            knowledgeDocument.setDocUrl(fileUrl);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        this.documentMapper.insert(knowledgeDocument);
+        documentMapper.deleteById(id);
     }
 
     /**
@@ -178,7 +163,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             throw new IllegalArgumentException("title must not be blank");
         document.setDocTitle(documentRequest.title());
         document.setDescription(documentRequest.description());
-        document.setKnowledgeBaseType(documentRequest.knowledgeBaseType());
+        document.setKnowledgeBaseType(KnowledgeBaseType.valueOf(documentRequest.knowledgeBaseType()));
         document.setExtension(documentRequest.extension());
     }
 

@@ -3,6 +3,7 @@ package com.jaycong.know.engine.document.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jaycong.know.engine.common.error.BusinessException;
 import com.jaycong.know.engine.common.error.ErrorCode;
+import com.jaycong.know.engine.document.constant.SegmentStatus;
 import com.jaycong.know.engine.document.dto.SegmentRequest;
 import com.jaycong.know.engine.document.entity.KnowledgeSegment;
 import com.jaycong.know.engine.document.mapper.KnowledgeSegmentMapper;
@@ -40,7 +41,7 @@ public class KnowledgeSegmentServiceImpl implements KnowledgeSegmentService {
     public KnowledgeSegment create(SegmentRequest segmentRequest) {
         KnowledgeSegment segment = new KnowledgeSegment();
         apply(segment, segmentRequest);
-        segment.setStatus("STORED");
+        segment.setStatus(SegmentStatus.STORED);
         segment.setDeleted(0);
         mapper.insert(segment);
         return segment;

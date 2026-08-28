@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.jaycong.know.engine.common.base.BaseEntity;
+import com.jaycong.know.engine.document.constant.SegmentStatus;
 import lombok.Data;
 
 /**
@@ -40,7 +41,7 @@ public class KnowledgeSegment extends BaseEntity {
     /**
      * 片段处理状态。
      */
-    private String status;
+    private SegmentStatus status;
     /**
      * 是否跳过嵌入生成。
      */

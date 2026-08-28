@@ -15,8 +15,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
-
 /**
  * 知识文档管理接口，提供文档 CRUD 与纯文本上传切片能力。
  */
@@ -48,7 +46,13 @@ public class KnowledgeDocumentController {
             @RequestParam("knowledgeBaseType") String knowledgeBaseType
     ) {
         DocumentUploadParam request = new DocumentUploadParam(file, title, tableName, description, knowledgeBaseType);
-        documentService.uploadFile(request);
+        documentProcessService.uploadFile(request);
+        return ApiResponse.success();
+    }
+
+    @PostMapping("/convertDocument/{documentId}")
+    public ApiResponse convertDocument(@PathVariable Long documentId, @RequestParam("minerUdocUrl") String minerUdocUrl) {
+        documentProcessService.manulConvertDocument(documentId,minerUdocUrl);
         return ApiResponse.success();
     }
 

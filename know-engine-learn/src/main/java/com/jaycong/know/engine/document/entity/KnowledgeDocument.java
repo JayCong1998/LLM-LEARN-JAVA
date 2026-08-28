@@ -1,12 +1,10 @@
 package com.jaycong.know.engine.document.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.jaycong.know.engine.common.base.BaseEntity;
+import com.jaycong.know.engine.document.constant.DocumentStatus;
+import com.jaycong.know.engine.document.constant.KnowledgeBaseType;
 import lombok.Data;
-
-import java.time.LocalDateTime;
 
 /**
  * 知识文档表的实体映射。
@@ -22,8 +20,7 @@ public class KnowledgeDocument extends BaseEntity {
     /**
      * 文档处理状态。
      */
-    private String status;
-
+    private DocumentStatus status;
     /**
      * 原文档地址
      */
@@ -39,9 +36,9 @@ public class KnowledgeDocument extends BaseEntity {
      */
     private String description;
     /**
-     * 知识库类型。
+     * 知识库类型
      */
-    private String knowledgeBaseType;
+    private KnowledgeBaseType knowledgeBaseType;
     /**
      * JSON 扩展字段。
      */
