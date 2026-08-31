@@ -31,3 +31,17 @@ CREATE TABLE `knowledge_segment` (
   `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '是否删除：0-未删除，1-已删除',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识片段表';
+
+
+CREATE TABLE `sys_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '用户ID',
+  `username` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '用户名',
+  `nickname` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '用户显示名称',
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '用户电子邮箱',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `lock_version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '是否删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_sys_user_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户表';

@@ -23,9 +23,6 @@ import org.springframework.web.multipart.MultipartFile;
 @Validated
 public class KnowledgeDocumentController {
 
-    /**
-     * 知识文档应用服务。
-     */
     @Autowired
     private KnowledgeDocumentService documentService;
 
@@ -51,7 +48,7 @@ public class KnowledgeDocumentController {
     }
 
     @PostMapping("/convertDocument/{documentId}")
-    public ApiResponse convertDocument(@PathVariable Long documentId, @RequestParam("minerUdocUrl") String minerUdocUrl) {
+    public ApiResponse convertDocument(@PathVariable Long documentId, @RequestParam("minerUdocUrl") String minerUdocUrl) throws Exception {
         documentProcessService.manulConvertDocument(documentId,minerUdocUrl);
         return ApiResponse.success();
     }
@@ -72,7 +69,7 @@ public class KnowledgeDocumentController {
                                      @RequestParam(value = "titleLevel", required = false) Integer titleLevel,
                                      @RequestParam(value = "separator", required = false) String separator
     ) {
-        KnowledgeDocument document = documentService.get(documentId);
+        KnowledgeDocument document = documentService.getDocumentById(documentId);
         documentProcessService.split(document, new DocumentSplitParam(splitType, chunkSize, overlap, titleLevel, separator, regex));
         return ApiResponse.success();
     }
@@ -95,7 +92,7 @@ public class KnowledgeDocumentController {
             @RequestParam(required = false) String docTitle,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String knowledgeBaseType) {
-        return ApiResponse.success(documentService.page(current, size, docTitle, status, knowledgeBaseType));
+        return ApiResponse.success(documentService.pageDocuments(current, size, docTitle, status, knowledgeBaseType));
     }
 
     /**
@@ -106,7 +103,7 @@ public class KnowledgeDocumentController {
      */
     @PostMapping
     public ApiResponse<KnowledgeDocument> create(@Valid @RequestBody DocumentRequest request) {
-        return ApiResponse.success(documentService.create(request));
+        return ApiResponse.success(documentService.createDocument(request));
     }
 
     /**
@@ -116,8 +113,8 @@ public class KnowledgeDocumentController {
      * @return 文档详情
      */
     @GetMapping("/{id}")
-    public ApiResponse<KnowledgeDocument> get(@PathVariable @Positive(message = "文档主键必须为正数") Long id) {
-        return ApiResponse.success(documentService.get(id));
+    public ApiResponse<KnowledgeDocument> getById(@PathVariable @Positive(message = "文档主键必须为正数") Long id) {
+        return ApiResponse.success(documentService.getDocumentById(id));
     }
 
     /**
@@ -128,10 +125,10 @@ public class KnowledgeDocumentController {
      * @return 更新后的文档
      */
     @PutMapping("/{id}")
-    public ApiResponse<KnowledgeDocument> update(
+    public ApiResponse<KnowledgeDocument> updateById(
             @PathVariable @Positive(message = "文档主键必须为正数") Long id,
             @Valid @RequestBody DocumentRequest request) {
-        return ApiResponse.success(documentService.update(id, request));
+        return ApiResponse.success(documentService.updateDocument(id, request));
     }
 
     /**
@@ -141,8 +138,8 @@ public class KnowledgeDocumentController {
      * @return 操作结果
      */
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable @Positive(message = "文档主键必须为正数") Long id) {
-        documentService.delete(id);
+    public ApiResponse<Void> deleteById(@PathVariable @Positive(message = "文档主键必须为正数") Long id) {
+        documentService.removeById(id);
         return ApiResponse.success();
     }
 }

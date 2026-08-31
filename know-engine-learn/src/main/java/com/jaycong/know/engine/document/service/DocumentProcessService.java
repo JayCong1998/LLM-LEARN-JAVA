@@ -19,7 +19,7 @@ public interface DocumentProcessService {
      */
     void uploadFile(DocumentUploadParam request);
 
-    void manulConvertDocument(Long documentId, String minerUdocUrl);
+    void manulConvertDocument(Long documentId, String minerUdocUrl) throws Exception;
 
     void split(KnowledgeDocument document, DocumentSplitParam documentSplitParam);
 

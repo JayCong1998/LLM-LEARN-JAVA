@@ -3,57 +3,35 @@ package com.jaycong.know.engine.document.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.jaycong.know.engine.common.api.PageResponse;
 import com.jaycong.know.engine.common.error.BusinessException;
 import com.jaycong.know.engine.common.error.ErrorCode;
 import com.jaycong.know.engine.document.constant.DocumentStatus;
 import com.jaycong.know.engine.document.constant.KnowledgeBaseType;
 import com.jaycong.know.engine.document.dto.DocumentRequest;
-import com.jaycong.know.engine.document.dto.DocumentUploadParam;
 import com.jaycong.know.engine.document.entity.KnowledgeDocument;
 import com.jaycong.know.engine.document.mapper.KnowledgeDocumentMapper;
-import com.jaycong.know.engine.document.mapper.KnowledgeSegmentMapper;
 import com.jaycong.know.engine.document.service.KnowledgeDocumentService;
 import com.jaycong.know.engine.minio.FileStorageService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 /**
  * 知识文档的持久化、查询及文本上传切片服务。
+ * <p>
+ * 继承 {@link ServiceImpl} 复用 MyBatis-Plus 通用 CRUD；{@code removeById} 等基础方法直接由父类提供，
+ * 软删除由实体 {@code @TableLogic} 字段自动处理，无需自行实现。
  */
 @Service
-public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
-    /**
-     * 默认片段最大字符数。
-     */
-    private static final int DEFAULT_CHUNK_SIZE = 500;
+public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentMapper, KnowledgeDocument>
+        implements KnowledgeDocumentService {
 
     /**
-     * 知识文档数据访问对象。
+     * 文件存储服务。
      */
-    private final KnowledgeDocumentMapper documentMapper;
-
-    /**
-     * 知识片段数据访问对象。
-     */
-    private final KnowledgeSegmentMapper segmentMapper;
-
-    /**
-     * 创建知识文档服务。
-     *
-     * @param documentMapper 知识文档数据访问对象
-     * @param segmentMapper  知识片段数据访问对象
-     */
-    public KnowledgeDocumentServiceImpl(KnowledgeDocumentMapper documentMapper, KnowledgeSegmentMapper segmentMapper) {
-        this.documentMapper = documentMapper;
-        this.segmentMapper = segmentMapper;
-    }
-
     @Autowired
     private FileStorageService fileStorageService;
-
 
     /**
      * 创建未切片的知识文档。
@@ -62,39 +40,38 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * @return 已创建的知识文档
      */
     @Override
-    public KnowledgeDocument create(DocumentRequest documentRequest) {
+    public KnowledgeDocument createDocument(DocumentRequest documentRequest) {
         if (documentRequest == null || blank(documentRequest.title()))
             throw new IllegalArgumentException("title must not be blank");
         KnowledgeDocument document = new KnowledgeDocument();
         apply(document, documentRequest);
         document.setStatus(DocumentStatus.INIT);
         document.setDeleted(0);
-        documentMapper.insert(document);
+        baseMapper.insert(document);
         return document;
     }
 
-    /**
-     * 根据主键查询未删除的知识文档。
-     *
-     * @param id 文档主键
-     * @return 文档详情
-     */
     @Override
-    public KnowledgeDocument get(Long id) {
-        KnowledgeDocument document = documentMapper.selectById(id);
+    public KnowledgeDocument getDocumentById(Long documentId) {
+          KnowledgeDocument document = baseMapper.selectById(documentId);
         if (document == null || Integer.valueOf(1).equals(document.getDeleted()))
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "知识文档不存在");
         return document;
     }
 
     /**
-     * 查询全部未删除的知识文档。
+     * 根据 DTO 更新文档基础信息。
      *
-     * @return 文档列表
+     * @param documentId      文档主键
+     * @param documentRequest 文档更新请求
+     * @return 更新后的文档实体
      */
     @Override
-    public List<KnowledgeDocument> list() {
-        return documentMapper.selectList(new LambdaQueryWrapper<KnowledgeDocument>().eq(KnowledgeDocument::getDeleted, 0));
+    public KnowledgeDocument updateDocument(Long documentId, DocumentRequest documentRequest) {
+        KnowledgeDocument document = getDocumentById(documentId);
+        apply(document, documentRequest);
+        baseMapper.updateById(document);
+        return document;
     }
 
     /**
@@ -108,8 +85,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * @return 包含文档记录和分页信息的查询结果
      */
     @Override
-    public PageResponse<KnowledgeDocument> page(long current, long size, String docTitle, String status,
-                                                String knowledgeBaseType) {
+    public PageResponse<KnowledgeDocument> pageDocuments(long current, long size, String docTitle, String status,
+                                                         String knowledgeBaseType) {
         Page<KnowledgeDocument> documentPage = new Page<>(current, size);
         LambdaQueryWrapper<KnowledgeDocument> queryWrapper = new LambdaQueryWrapper<KnowledgeDocument>()
                 .eq(KnowledgeDocument::getDeleted, 0)
@@ -117,39 +94,22 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 .eq(!blank(status), KnowledgeDocument::getStatus, status)
                 .eq(!blank(knowledgeBaseType), KnowledgeDocument::getKnowledgeBaseType, knowledgeBaseType)
                 .orderByDesc(KnowledgeDocument::getCreatedAt);
-        return PageResponse.from(documentMapper.selectPage(documentPage, queryWrapper));
+        return PageResponse.from(baseMapper.selectPage(documentPage, queryWrapper));
     }
 
     /**
-     * 更新文档基础信息，不改变文档处理状态。
+     * 按文档主键更新处理状态。
      *
-     * @param id              文档主键
-     * @param documentRequest 文档更新请求
-     * @return 更新后的知识文档
+     * @param documentId 文档主键
+     * @param status     目标处理状态
      */
-    @Override
-    public KnowledgeDocument update(Long id, DocumentRequest documentRequest) {
-        KnowledgeDocument document = get(id);
-        apply(document, documentRequest);
-        documentMapper.updateById(document);
-        return document;
-    }
-
     @Override
     public void updateStatus(Long documentId, DocumentStatus status) {
-        LambdaUpdateWrapper<KnowledgeDocument> queryWrapper = new LambdaUpdateWrapper<>();
-        queryWrapper.set(KnowledgeDocument::getStatus, status).eq(KnowledgeDocument::getId, documentId);
-        documentMapper.update(queryWrapper);
-    }
-
-    /**
-     * 软删除指定知识文档。
-     *
-     * @param id 文档主键
-     */
-    @Override
-    public void delete(Long id) {
-        documentMapper.deleteById(id);
+        KnowledgeDocument update = new KnowledgeDocument();
+        update.setStatus(status);
+        LambdaUpdateWrapper<KnowledgeDocument> updateWrapper = new LambdaUpdateWrapper<KnowledgeDocument>()
+                .eq(KnowledgeDocument::getId, documentId);
+        baseMapper.update(update, updateWrapper);
     }
 
     /**

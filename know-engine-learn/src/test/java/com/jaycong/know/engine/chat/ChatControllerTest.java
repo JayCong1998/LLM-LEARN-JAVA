@@ -1,4 +1,4 @@
-package com.jaycong.llm.chat;
+package com.jaycong.know.engine.chat;
 
 import com.jaycong.know.engine.ai.controller.ChatController;
 import com.jaycong.know.engine.ai.aiservice.DemoChatService;

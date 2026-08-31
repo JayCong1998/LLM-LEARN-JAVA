@@ -32,7 +32,7 @@ public class KnowledgeSegmentController {
      */
     @PostMapping
     public ApiResponse<KnowledgeSegment> create(@Valid @RequestBody SegmentRequest request) {
-        return ApiResponse.success(knowledgeSegmentService.create(request));
+        return ApiResponse.success(knowledgeSegmentService.createSegment(request));
     }
 
     /**
@@ -42,8 +42,8 @@ public class KnowledgeSegmentController {
      * @return 片段详情
      */
     @GetMapping("/{id}")
-    public ApiResponse<KnowledgeSegment> get(@PathVariable @Positive(message = "片段主键必须为正数") Long id) {
-        return ApiResponse.success(knowledgeSegmentService.get(id));
+    public ApiResponse<KnowledgeSegment> getById(@PathVariable @Positive(message = "片段主键必须为正数") Long id) {
+        return ApiResponse.success(knowledgeSegmentService.getSegmentById(id));
     }
 
     /**
@@ -55,7 +55,7 @@ public class KnowledgeSegmentController {
     @GetMapping
     public ApiResponse<List<KnowledgeSegment>> list(
             @RequestParam(required = false) @Positive(message = "文档主键必须为正数") Long documentId) {
-        return ApiResponse.success(knowledgeSegmentService.list(documentId));
+        return ApiResponse.success(knowledgeSegmentService.listByDocumentId(documentId));
     }
 
     /**
@@ -66,10 +66,10 @@ public class KnowledgeSegmentController {
      * @return 更新后的片段
      */
     @PutMapping("/{id}")
-    public ApiResponse<KnowledgeSegment> update(
+    public ApiResponse<KnowledgeSegment> updateById(
             @PathVariable @Positive(message = "片段主键必须为正数") Long id,
             @Valid @RequestBody SegmentRequest request) {
-        return ApiResponse.success(knowledgeSegmentService.update(id, request));
+        return ApiResponse.success(knowledgeSegmentService.updateSegment(id, request));
     }
 
     /**
@@ -79,8 +79,8 @@ public class KnowledgeSegmentController {
      * @return 操作结果
      */
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable @Positive(message = "片段主键必须为正数") Long id) {
-        knowledgeSegmentService.delete(id);
+    public ApiResponse<Void> deleteById(@PathVariable @Positive(message = "片段主键必须为正数") Long id) {
+        knowledgeSegmentService.removeById(id);
         return ApiResponse.success();
     }
 }

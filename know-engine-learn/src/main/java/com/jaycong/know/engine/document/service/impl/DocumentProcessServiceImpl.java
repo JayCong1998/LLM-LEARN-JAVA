@@ -1,50 +1,49 @@
 package com.jaycong.know.engine.document.service.impl;
 
 
+import com.alibaba.fastjson2.JSON;
+import com.google.common.base.Stopwatch;
 import com.jaycong.know.engine.common.error.BusinessException;
 import com.jaycong.know.engine.common.error.ErrorCode;
 import com.jaycong.know.engine.document.constant.DocumentStatus;
 import com.jaycong.know.engine.document.constant.KnowledgeBaseType;
+import com.jaycong.know.engine.document.constant.SegmentStatus;
 import com.jaycong.know.engine.document.dto.DocumentSplitParam;
 import com.jaycong.know.engine.document.dto.DocumentUploadParam;
 import com.jaycong.know.engine.document.entity.KnowledgeDocument;
 import com.jaycong.know.engine.document.entity.KnowledgeSegment;
-import com.jaycong.know.engine.document.mapper.KnowledgeDocumentMapper;
 import com.jaycong.know.engine.document.process.FileProcessService;
 import com.jaycong.know.engine.document.process.FileProcessServiceFactory;
 import com.jaycong.know.engine.document.service.DocumentProcessService;
 import com.jaycong.know.engine.document.service.KnowledgeDocumentService;
+import com.jaycong.know.engine.document.service.KnowledgeSegmentService;
 import com.jaycong.know.engine.document.util.FileTypeUtil;
 import com.jaycong.know.engine.minio.FileStorageService;
-import com.jaycong.know.engine.rag.splitter.DocumentSplitterFactory;
+import com.jaycong.know.engine.rag.constant.MetadataKeyConstant;
+import com.jaycong.know.engine.rag.splitter.MarkdownHeaderParentTextSplitter;
+import com.jaycong.know.engine.rag.store.VectorStoreService;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
+import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.config.RequestConfig;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.util.Timeout;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author pyc
  * @since 2026-08-27 21:59
  */
+@Slf4j
 @Service
 public class DocumentProcessServiceImpl implements DocumentProcessService {
 
@@ -55,10 +54,13 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
     private FileProcessServiceFactory fileProcessServiceFactory;
 
     @Autowired
-    private KnowledgeDocumentMapper documentMapper;
+    private KnowledgeDocumentService documentService;
 
     @Autowired
-    private KnowledgeDocumentService documentService;
+    private KnowledgeSegmentService segmentService;
+
+    @Autowired
+    private VectorStoreService vectorStoreService;
 
 
     @Override
@@ -75,59 +77,29 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        this.documentMapper.insert(knowledgeDocument);
+        this.documentService.save(knowledgeDocument);
 //        convertDocument(knowledgeDocument, request.file());
     }
 
     @Override
-    public void manulConvertDocument(Long documentId, String minerUdocUrl) {
+    public void manulConvertDocument(Long documentId, String minerUdocUrl) throws Exception {
         // 1. 根据文档ID查询文档信息
-        KnowledgeDocument document = documentService.get(documentId);
-
-        // 2. minerUdocUrl 文件地址，根据url去下载文件并封装成MultipartFile
-        MultipartFile file = downloadAsMultipartFile(minerUdocUrl, extractFileNameFromUrl(minerUdocUrl, document));
-
-        // 3. 调用convertDocument方法进行转换处理
-        String convertedDocUrl = convertDocument(document, file);
+        KnowledgeDocument document = documentService.getDocumentById(documentId);
+        // 2. 从 MinIO 下载文件流
+        String objectName = fileStorageService.extractObjectNameFromUrl(minerUdocUrl);
+        String fileName = extractFileNameFromUrl(minerUdocUrl, document);
+        String convertedDocUrl;
+        try (InputStream inputStream = fileStorageService.downloadFile(objectName)) {
+            // 3. 调用 convertDocument 进行转换处理（直接传 InputStream，避免 MultipartFile 中间层）
+            convertedDocUrl = convertDocument(document, fileName, inputStream);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载远程文件失败: " + e.getMessage());
+        }
 
         // 4. 回写转换结果（转换后URL + 状态）
         document.setConvertedDocUrl(convertedDocUrl);
         document.setStatus(DocumentStatus.CONVERTED);
-        documentMapper.updateById(document);
-    }
-
-    /**
-     * 从远程URL下载文件内容并封装为 {@link MultipartFile}。
-     *
-     * @param url      远程文件下载地址
-     * @param fileName 转换后的 MultipartFile 文件名，用于文件类型识别
-     * @return 包含远程文件内容的 MultipartFile
-     */
-    private MultipartFile downloadAsMultipartFile(String url, String fileName) {
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectTimeout(Timeout.ofSeconds(30))
-                .setResponseTimeout(Timeout.ofMinutes(5))
-                .build();
-        try (CloseableHttpClient httpClient = HttpClients.custom()
-                .setDefaultRequestConfig(requestConfig)
-                .build()) {
-            HttpGet httpGet = new HttpGet(url);
-            return httpClient.execute(httpGet, response -> {
-                int statusCode = response.getCode();
-                if (statusCode >= 400) {
-                    throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载远程文件失败，HTTP状态码: " + statusCode);
-                }
-                if (response.getEntity() == null) {
-                    throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载远程文件失败，响应内容为空");
-                }
-                byte[] body = EntityUtils.toByteArray(response.getEntity());
-                return new ByteArrayMultipartFile(fileName, body);
-            });
-        } catch (BusinessException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "下载远程文件失败: " + e.getMessage());
-        }
+        documentService.updateById(document);
     }
 
     /**
@@ -150,67 +122,14 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         return (title == null || title.isEmpty() ? "manual_convert_" + document.getId() : title) + ".md";
     }
 
-    /**
-     * 基于字节数组的简单 {@link MultipartFile} 实现，用于将内存中的文件内容传递给文件处理器。
-     */
-    private record ByteArrayMultipartFile(String fileName, byte[] content) implements MultipartFile {
+    public String convertDocument(KnowledgeDocument document, String fileName, InputStream inputStream) {
+        FileProcessService fileProcessService = fileProcessServiceFactory.get(
+                FileTypeUtil.getFileType(fileName), document.getKnowledgeBaseType());
 
-        @Override
-        public String getName() {
-            return "file";
-        }
-
-        @Override
-        public String getOriginalFilename() {
-            return fileName;
-        }
-
-        @Override
-        public String getContentType() {
-            return null;
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return content.length == 0;
-        }
-
-        @Override
-        public long getSize() {
-            return content.length;
-        }
-
-        @Override
-        public byte[] getBytes() throws IOException {
-            return content;
-        }
-
-        @Override
-        public InputStream getInputStream() throws IOException {
-            return new ByteArrayInputStream(content);
-        }
-
-        @Override
-        public void transferTo(File dest) throws IOException, IllegalStateException {
-            Files.write(dest.toPath(), content);
-        }
-    }
-
-    public String convertDocument(KnowledgeDocument document, MultipartFile file) {
-        String fileName = file.getOriginalFilename();
-        String convertedDocUrl;
-        FileProcessService fileProcessService = fileProcessServiceFactory.get(FileTypeUtil.getFileType(fileName, file), document.getKnowledgeBaseType());
-
-        if (fileProcessService != null) {
-            try {
-                convertedDocUrl = fileProcessService.processDocument(document, file.getInputStream());
-            } catch (IOException e) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "文件处理器处理转换失败");
-            }
-        } else {
+        if (fileProcessService == null) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "找不到文件处理器");
         }
-        return convertedDocUrl;
+        return fileProcessService.processDocument(document, inputStream);
     }
 
     @Override
@@ -224,12 +143,79 @@ public class DocumentProcessServiceImpl implements DocumentProcessService {
         List<TextSegment> segments = new ArrayList<>();
         try (InputStream inputStream = fileStorageService.downloadFile(objectName)) {
 
-            DocumentSplitter splitter = DocumentSplitterFactory.getInstance(documentSplitParam);
+//            DocumentSplitter splitter = DocumentSplitterFactory.getInstance(documentSplitParam);
+            //先默认吧
+            DocumentSplitter splitter = new MarkdownHeaderParentTextSplitter(2, false, false, documentSplitParam.chunkSize(), documentSplitParam.overlap());
             Document doc = Document.from(new String(inputStream.readAllBytes(), StandardCharsets.UTF_8));
             segments = splitter.split(doc);
         } catch (Exception e) {
             throw new RuntimeException("下载文档失败: " + e.getMessage(), e);
         }
-        System.out.println(segments);
+        // 4. 转换为 KnowledgeSegment 并保存
+        for (int i = 0; i < segments.size(); i++) {
+
+            TextSegment segment = segments.get(i);
+            KnowledgeSegment knowledgeSegment = new KnowledgeSegment();
+            knowledgeSegment.setText(segment.text());
+            knowledgeSegment.setChunkId(segment.metadata().getString(MetadataKeyConstant.CHUNK_ID));
+            Metadata metadata = segment.metadata();
+            knowledgeSegment.setMetadata(enrichMetadata(document, metadata));
+            knowledgeSegment.setDocumentId(document.getId());
+            knowledgeSegment.setChunkOrder(i);
+
+            // 检查是否需要跳过嵌入
+            Integer skipEmbedding = metadata.getInteger(MetadataKeyConstant.SKIP_EMBEDDING);
+            if (skipEmbedding != null && skipEmbedding == 1) {
+                knowledgeSegment.setSkipEmbedding(1);
+                knowledgeSegment.setStatus(SegmentStatus.STORED);
+            } else {
+                knowledgeSegment.setSkipEmbedding(0);
+                knowledgeSegment.setStatus(SegmentStatus.STORED);
+            }
+
+            knowledgeSegments.add(knowledgeSegment);
+        }
+
+        // 5. 批量保存片段
+        Stopwatch stopwatch = Stopwatch.createStarted();
+        //这里使用mybatisplus service的批量插入可以配置mysql的批量参数实现性能优化
+        boolean saveResult = segmentService.saveBatch(knowledgeSegments);
+        Assert.isTrue(saveResult, "保存知识片段失败");
+        log.info("保存知识片段耗时: {}", stopwatch.elapsed().toMillis());
+
+        int segmentCount = knowledgeSegments.size();
+
+        // 6. 更新文档状态为 CHUNKED，并保存分段参数
+        documentService.updateStatus(document.getId(), DocumentStatus.CHUNKED);
+
+        // 发送文档已分段事件  todo
+//        publishChunkedEvent(document, segmentCount);
+
+        try {
+            List<String> strings = vectorStoreService.embedAndStore(knowledgeSegments);
+
+            boolean success = true;
+            Assert.isTrue(success, "向量嵌入失败: documentId=" + document.getId());
+            log.info("向量嵌入完成，documentId: {}, success: {}", document.getId(), success);
+            document.setStatus(DocumentStatus.VECTOR_STORED);
+            boolean docResult = documentService.updateById(document);
+        } catch (Exception e) {
+            log.error("向量嵌入失败，documentId: {}", document.getId(), e);
+        }
+    }
+
+
+    /**
+     * 填充元数据
+     *
+     * @param document 文档信息
+     * @param metadata 元数据
+     * @return
+     */
+    private static String enrichMetadata(KnowledgeDocument document, Metadata metadata) {
+        metadata.put(MetadataKeyConstant.DOC_ID, document.getId());
+        metadata.put(MetadataKeyConstant.FILE_NAME, document.getDocTitle());
+        Map<String, Object> metadataMap = metadata.toMap();
+        return JSON.toJSONString(metadataMap);
     }
 }

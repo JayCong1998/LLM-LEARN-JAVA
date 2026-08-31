@@ -1,11 +1,15 @@
 package com.jaycong.know.engine.document.entity;
 
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.jaycong.know.engine.common.base.BaseEntity;
 import com.jaycong.know.engine.document.constant.SegmentStatus;
 import lombok.Data;
+
+import java.util.Map;
 
 /**
  * 知识片段表的实体映射。
@@ -46,4 +50,9 @@ public class KnowledgeSegment extends BaseEntity {
      * 是否跳过嵌入生成。
      */
     private Integer skipEmbedding;
+
+    @JsonIgnore
+    public Map<String, String> getMetadataMap() {
+        return metadata == null ? null : JSON.parseObject(metadata, Map.class);
+    }
 }
